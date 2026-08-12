@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Due and not yet done. Same size as a kept one, so the row's pitch reads as
+     the day rather than as a count that shrinks. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="@color/notif_activity_track" />
+    <size android:width="6dp" android:height="6dp" />
+</shape>

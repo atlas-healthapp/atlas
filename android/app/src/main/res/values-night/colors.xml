@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The DARK shade. Same names as values/colors.xml, values lifted from the
+         dark-theme block in src/style.css. See that file's note: the two family
+         sets are spaced in luminance as well as hue, because hue is what colour
+         blindness removes. Do not tidy these hexes. -->
+    <color name="notif_body">#d8b4fe</color>
+    <color name="notif_intake">#5b9df8</color>
+    <color name="notif_activity">#2dd4bf</color>
+    <color name="notif_recovery">#fcd34d</color>
+
+    <color name="notif_body_track">#38d8b4fe</color>
+    <color name="notif_intake_track">#385b9df8</color>
+    <color name="notif_activity_track">#382dd4bf</color>
+    <color name="notif_recovery_track">#38fcd34d</color>
+
+    <color name="notif_hairline">#22ffffff</color>
+
+    <color name="notif_ink">#ffffff</color>
+    <color name="notif_dim">#c4c9d0</color>
+</resources>

@@ -1,0 +1,354 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- The rows. Same five things the collapsed strip shows, named, plus steps.
+     Label / mark / figure is the same object Home's MetricRow is, so the shade
+     borrows the app's vocabulary rather than inventing one for itself.
+
+     Colours come from @color/notif_*, which resolve against values/ or
+     values-night/ by the SHADE's night mode, not the app's theme. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+
+    <!-- RECOVERY -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:layout_width="74dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:letterSpacing="0.13"
+            android:textAllCaps="true"
+            android:textColor="@color/notif_dim"
+            android:text="Recovery" />
+
+        <ProgressBar
+            android:id="@+id/row_bar_recovery"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="0dp"
+            android:layout_height="4dp"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:max="100"
+            android:progressDrawable="@drawable/notif_track"
+            android:progressTint="@color/notif_recovery"
+            android:progressBackgroundTint="@color/notif_recovery_track" />
+
+        <TextView
+            android:id="@+id/row_val_recovery"
+            android:layout_width="82dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:gravity="end"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+
+    <!-- SLEEP -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:layout_width="74dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:letterSpacing="0.13"
+            android:textAllCaps="true"
+            android:textColor="@color/notif_dim"
+            android:text="Sleep" />
+
+        <ProgressBar
+            android:id="@+id/row_bar_sleep"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="0dp"
+            android:layout_height="4dp"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:max="100"
+            android:progressDrawable="@drawable/notif_track"
+            android:progressTint="@color/notif_body"
+            android:progressBackgroundTint="@color/notif_body_track" />
+
+        <TextView
+            android:id="@+id/row_val_sleep"
+            android:layout_width="82dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:gravity="end"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+
+    <!-- ROUTINE. Dots rather than a bar: nine things you have to do is not a
+         proportion, and the gaps are what say which part of the day is untouched. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:layout_width="74dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:letterSpacing="0.13"
+            android:textAllCaps="true"
+            android:textColor="@color/notif_dim"
+            android:text="Routine" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageView
+                android:id="@+id/dot_1"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/notif_dot_off"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/dot_2"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/notif_dot_off"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/dot_3"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/notif_dot_off"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/dot_4"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/notif_dot_off"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/dot_5"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/notif_dot_off"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/dot_6"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/notif_dot_off"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/dot_7"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/notif_dot_off"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/dot_8"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_marginEnd="4dp"
+                android:src="@drawable/notif_dot_off"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/dot_9"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:src="@drawable/notif_dot_off"
+                android:contentDescription="@null" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/row_val_routine"
+            android:layout_width="82dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:gravity="end"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+
+    <!-- PROTEIN -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:layout_width="74dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:letterSpacing="0.13"
+            android:textAllCaps="true"
+            android:textColor="@color/notif_dim"
+            android:text="Protein" />
+
+        <ProgressBar
+            android:id="@+id/row_bar_protein"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="0dp"
+            android:layout_height="4dp"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:max="100"
+            android:progressDrawable="@drawable/notif_track"
+            android:progressTint="@color/notif_intake"
+            android:progressBackgroundTint="@color/notif_intake_track" />
+
+        <TextView
+            android:id="@+id/row_val_protein"
+            android:layout_width="82dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:gravity="end"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+
+    <!-- STEPS -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:layout_width="74dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:letterSpacing="0.13"
+            android:textAllCaps="true"
+            android:textColor="@color/notif_dim"
+            android:text="Steps" />
+
+        <ProgressBar
+            android:id="@+id/row_bar_steps"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="0dp"
+            android:layout_height="4dp"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:max="100"
+            android:progressDrawable="@drawable/notif_track"
+            android:progressTint="@color/notif_activity"
+            android:progressBackgroundTint="@color/notif_activity_track" />
+
+        <TextView
+            android:id="@+id/row_val_steps"
+            android:layout_width="82dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:gravity="end"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+
+    <!-- An ImageView purely to draw a 1dp rule. RemoteViews inflates only a
+         whitelist of classes and plain View is NOT on it: a <View> here compiles,
+         installs, and then crashes the app outright, because a foreground service
+         that posts a notification the system cannot inflate is killed. -->
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="7dp"
+        android:background="@color/notif_hairline"
+        android:contentDescription="@null" />
+
+    <!-- The footer sorts by who it is for: what you do on the left, what the
+         strap is doing on the right. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="bottom"
+        android:baselineAligned="true"
+        android:paddingTop="7dp">
+
+        <TextView
+            android:id="@+id/foot_next"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="12dp"
+            android:textSize="13sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/foot_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:letterSpacing="0.03"
+            android:maxLines="1"
+            android:textColor="@color/notif_dim"
+            android:text="" />
+    </LinearLayout>
+</LinearLayout>
+

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme. -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+        <!-- DayNight's default window background is light grey in day mode,
+             which flashes at the top during the splash->activity handoff -->
+        <item name="android:windowBackground">@color/voidbg</item>
+        <item name="android:statusBarColor">@color/voidbg</item>
+    </style>
+
+
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@drawable/splash</item>
+        <!-- Android 12+ system splash: icon on this colour. Unset it defaults
+             to a grey system surface, which is the grey border seen around
+             the logo on cold launch - keep it the app's void colour. -->
+        <item name="windowSplashScreenBackground">@color/voidbg</item>
+        <!-- The peak on its own, with nothing behind it.
+             Left unset, Android draws the LAUNCHER icon here, and an adaptive
+             icon brings its background layer with it: that is where the lighter
+             disc around the mark came from, since icon-background.png is
+             Sentinel's bg0 token while the field is the void colour. (No double
+             hyphen on that name here: XML forbids it inside a comment and the
+             resource merger fails outright.) A transparent
+             vector has no background layer to draw, so the mark sits directly
+             on the field. windowSplashScreenIconBackgroundColor is deliberately
+             NOT set - setting it is what puts the disc back. -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_mark</item>
+    </style>
+</resources>

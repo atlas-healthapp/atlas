@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-theme="sentinel">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>Atlas</title>
+  </head>
+  <!-- pre-CSS frame is void, not white, before the real stylesheet loads.
+       :where() keeps this at zero specificity so the app's real `body{...}`
+       gradient rule in style.css always wins regardless of DOM/injection
+       order — without it, a production build (which injects the built
+       stylesheet's <link> earlier in <head> than this trailing <style> tag
+       gets parsed into) lets this hardcoded placeholder win the cascade
+       permanently, pinning every theme to this dark fallback color. -->
+  <style>
+    :where(body) {
+      background: #04080f;
+    }
+  </style>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

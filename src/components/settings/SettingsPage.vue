@@ -1,0 +1,913 @@
+<template>
+  <!-- A full page rather than a drawer: this is where the device panel, goals
+       and per-metric detail will grow, and a drawer has to stay shallow because
+       a drawer opened from a drawer has nowhere to go. Teleported and covering
+       the tab bar, so it reads as somewhere you went rather than a tab. -->
+  <Teleport to="body">
+    <div class="page grid-bg">
+      <div class="pscroll">
+        <div class="phd">
+          <!-- Boxed rather than a bare chevron, matching the [ SYS ] control
+               this page is opened from. The chevron is an SVG at the icon
+               set's stroke width, not a text glyph: glyphs shift with the
+               font and cannot be stroke-matched to anything else. -->
+          <button class="back mono" type="button" @click="$emit('close')">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M15 5l-7 7 7 7" />
+            </svg>
+            BACK
+          </button>
+
+          <div class="prof">
+            <div class="who">
+              <div class="pname">{{ profile.name || "Add your name" }}</div>
+              <div class="pmeta mono">
+                {{ checkin.entries.length }} DAYS RECORDED
+              </div>
+            </div>
+            <!-- Tapping it again closes: the chip that opened this page sits
+                 in exactly this spot at exactly this size, so it should behave
+                 like the same object rather than a dead decoration. -->
+            <button
+              class="avatar mono"
+              type="button"
+              aria-label="Close settings"
+              @click="$emit('close')"
+            >
+              {{ profile.initials }}
+            </button>
+          </div>
+        </div>
+
+        <!-- **Said once, on the first open, rather than as a tour step.** A
+             tour step about settings had to open settings to point at it, which
+             made the last thing the tour did a jump to another screen; and it
+             could only ever be seen by somebody who sat through five steps
+             first. This is read by everyone who gets here, however they got
+             here, and then never again. -->
+        <div v-if="showIntro" class="intro">
+          <p class="itext">
+            Everything here is yours to set: your goals, which rings show on
+            Home, the units, and how the app looks. None of it has to be decided
+            now.
+          </p>
+          <button class="idismiss mono" type="button" @click="dismissIntro">GOT IT</button>
+        </div>
+
+        <!-- First, above everything. Nothing else in settings matters until the
+             strap is connected: without it Recovery, sleep and every vital have
+             nothing to read, so a page that opened with a name field was
+             offering the least important control at the top. -->
+        <DevicePanel :open="openSection === 'device'" @toggle="toggle('device')" />
+
+        <!-- Both fields were only ever askable at first run, so anyone already
+             past it could not set or correct them. Date of birth needs a way in
+             particularly: it arrived after this user was onboarded, so without
+             this panel there was no way for him to enter it at all. -->
+        <SettingsSection
+          title="YOU"
+          :summary="profile.name ? profile.name.toUpperCase() : 'NOT SET'"
+          :open="openSection === 'you'"
+          @toggle="toggle('you')"
+        >
+          <label class="flabel mono" for="set-name">NAME</label>
+          <input
+            id="set-name"
+            v-model="youDraft.name"
+            class="pfield mono"
+            type="text"
+            maxlength="40"
+            placeholder="YOUR NAME"
+          />
+          <label class="flabel mono" for="set-dob">DATE OF BIRTH</label>
+          <input
+            id="set-dob"
+            v-model="youDraft.dob"
+            class="pfield mono"
+            type="date"
+            :max="todayIso"
+            min="1900-01-01"
+          />
+          <!-- **Fields only, no explanatory paragraphs.** They said why each
+               one is wanted, which is first run's job: by the time somebody is
+               editing them in settings they have already decided to give them,
+               and three paragraphs between four inputs made a short form read as
+               a long one. -->
+          <label class="flabel mono">SEX</label>
+          <div class="sexrow">
+            <button
+              v-for="opt in ['male', 'female']"
+              :key="opt"
+              class="sexbtn mono"
+              :class="{ on: youDraft.sex === opt }"
+              type="button"
+              @click="youDraft.sex = youDraft.sex === opt ? '' : opt"
+            >
+              {{ opt.toUpperCase() }}
+            </button>
+          </div>
+
+          <!-- Here as well as in first run, because everybody already using
+               Atlas came through a first run that never asked. Without this the
+               only route to a height is a reinstall, which wipes the archive. -->
+          <label class="flabel mono" for="set-height">HEIGHT</label>
+          <!-- `pfield`, which is what the name and date fields above use. It was
+               `field`, a class this panel does not define at all, so the input
+               fell back to the browser's own and sat in the middle of a column of
+               Atlas ones looking like a mistake.
+
+               The unit rides inside the box rather than in the label, so what is
+               typed and what it is measured in read as one thing, and the box is
+               sized to the three digits it takes rather than the full width: a
+               full-bleed field invites a sentence. -->
+          <span class="unitfield">
+            <input
+              id="set-height"
+              v-model="youDraft.heightCm"
+              class="pfield mono"
+              type="number"
+              inputmode="numeric"
+              min="120"
+              max="230"
+              placeholder="178"
+            />
+            <span class="unitsuffix mono">CM</span>
+          </span>
+
+          <!-- **Saved on a button, not on every change event.** These four
+               fields were each written the moment they blurred, so half a typed
+               height was a stored height, tabbing away from a date picker mid-edit
+               committed it, and nothing on screen ever said whether a change had
+               taken. Four fields that belong to one person are one decision.
+
+               The button says what will happen and is disabled when nothing has,
+               so it doubles as the answer to "did that save". -->
+          <div class="btnrow">
+            <button
+              class="databtn mono primary"
+              type="button"
+              :disabled="!youDirty"
+              @click="saveYou"
+            >
+              {{ youSaved ? "SAVED" : "SAVE DETAILS" }}
+            </button>
+            <button class="databtn mono" type="button" :disabled="!youDirty" @click="resetYou">
+              DISCARD
+            </button>
+          </div>
+        </SettingsSection>
+
+        <!-- Straight after YOU, because the two together are what makes the app
+             yours rather than the author's, and because half of these targets
+             only make sense once it knows your weight. -->
+        <GoalsPanel :open="openSection === 'goals'" @toggle="toggle('goals')" />
+
+        <UnitsPanel :open="openSection === 'units'" @toggle="toggle('units')" />
+
+        <DialsPanel :open="openSection === 'dials'" @toggle="toggle('dials')" />
+
+        <SettingsSection
+          title="APPEARANCE"
+          :summary="activeTheme.label.toUpperCase()"
+          :open="openSection === 'theme'"
+          @toggle="toggle('theme')"
+        >
+          <div class="themerow">
+            <button
+              v-for="t in THEMES"
+              :key="t.id"
+              class="tdot"
+              :class="{ on: theme.current === t.id }"
+              :style="{
+                borderColor: swatchColor(t.id),
+                background: swatchBg(t.id),
+              }"
+              :aria-label="t.label"
+              @click="theme.setTheme(t.id)"
+            >
+              <span class="tcore" :style="{ background: swatchColor(t.id) }" />
+            </button>
+          </div>
+          <div class="tsub mono">{{ activeTheme.sub.toUpperCase() }}</div>
+        </SettingsSection>
+
+
+        <!-- Only once the strap is set up: an alarm needs the pairing key, and
+             a panel offering to write one without it could only ever fail. -->
+        <AlarmPanel
+          v-if="helio.connected"
+          :open="openSection === 'alarm'"
+          @toggle="toggle('alarm')"
+        />
+
+        <SettingsSection
+          title="DATA // BACKUP"
+          summary="JSON"
+          :open="openSection === 'data'"
+          @toggle="toggle('data')"
+        >
+          <div class="btnrow">
+            <button class="databtn mono" @click="doExport">EXPORT</button>
+            <button class="databtn mono" @click="fileInput.click()">
+              IMPORT
+            </button>
+          </div>
+          <input
+            ref="fileInput"
+            type="file"
+            accept=".json,application/json,.xlsx"
+            class="hidden-input"
+            @change="onImportFile"
+          />
+          <div v-if="pendingImport" class="confirm">
+            <div class="dim-text mono">
+              BACKUP FROM {{ pendingImport.exportedAt }} - IMPORTING REPLACES
+              ALL CURRENT DATA. CONTINUE?
+            </div>
+            <!-- Says what the file actually holds before it is trusted. A v1
+                 file carries no archive at all, and restoring one over a device
+                 with readings on it would replace the settings and silently
+                 leave the archive as it was. -->
+            <div class="dim-text mono">
+              {{ importScope }}
+            </div>
+            <div class="btnrow">
+              <button
+                class="databtn danger mono"
+                :disabled="restoring"
+                @click="doRestore"
+              >
+                {{ restoring ? "RESTORING…" : "REPLACE ALL" }}
+              </button>
+              <button class="databtn mono" @click="pendingImport = null">
+                CANCEL
+              </button>
+            </div>
+          </div>
+          <div v-if="v10Pending" class="confirm">
+            <div class="dim-text mono">
+              V10 EXPORT: {{ v10Pending.summary.healthRows }} HEALTH ROWS ·
+              {{ v10Pending.summary.weightRows }} WEIGHTS ·
+              {{ v10Pending.summary.from }} → {{ v10Pending.summary.to
+              }}<template v-if="v10Pending.summary.skipped">
+                · {{ v10Pending.summary.skipped }} ROWS SKIPPED</template
+              >. EXISTING ATLAS DATA ALWAYS WINS - MERGE?
+            </div>
+            <div class="btnrow">
+              <button class="databtn mono" @click="doV10Merge">MERGE</button>
+              <button class="databtn mono" @click="v10Pending = null">
+                CANCEL
+              </button>
+            </div>
+          </div>
+        </SettingsSection>
+
+        <!-- Last, on purpose. A trip is annotation rather than configuration:
+             it changes nothing about how Atlas behaves, only how a gap in a
+             chart is labelled once one has appeared. It sat third, above the
+             strap and the alarm, which put the rarest thing in the list above
+             the two that are actually about the device. -->
+        <SettingsSection
+          title="TRIPS // GAPS"
+          :summary="`${trips.trips.length} LOGGED`"
+          :open="openSection === 'trips'"
+          @toggle="toggle('trips')"
+        >
+          <div class="dim-text mono">
+            NAMES THE GAPS IN HISTORY CHARTS.
+          </div>
+          <button class="databtn mono trips" @click="tripManagerOpen = true">MANAGE TRIPS</button>
+        </SettingsSection>
+
+        <!-- Last, and a row rather than a section: it does one thing, and
+             opening a panel to find a single button would be the same
+             discoverability problem one level down. -->
+        <button class="panel tourrow" type="button" @click="ui.startTour()">
+          <span class="trtitle">TOUR</span>
+          <span class="trsub mono">A SHORT WALK THROUGH THE HOME SCREEN</span>
+        </button>
+
+        <div class="foot mono">ATLAS v{{ appVersion }}</div>
+      </div>
+    </div>
+
+    <Transition name="toast">
+      <div v-if="backupMsg" class="toast mono">{{ backupMsg }}</div>
+    </Transition>
+    <TripManager v-if="tripManagerOpen" @close="tripManagerOpen = false" />
+  </Teleport>
+</template>
+
+<script setup>
+import { computed, ref } from "vue";
+
+/**
+ * Which section is open, or null for none.
+ *
+ * One at a time, and the page opens with all of them closed: settings is a list
+ * of what can be changed, and you arrive knowing which one you came for.
+ */
+const openSection = ref(null);
+const toggle = (key) => {
+  openSection.value = openSection.value === key ? null : key;
+};
+import { useThemeStore, THEMES } from "@/stores/theme";
+import { useCheckinStore } from "@/stores/checkin";
+import { useProfileStore } from "@/stores/profile";
+import { useTripsStore } from "@/stores/trips";
+import { exportBackup, readBackupFile, applyBackup } from "@/utils/backup";
+import { parseV10File, mergeIntoCheckin } from "@/utils/v10import";
+import { useBackClose } from "@/composables/useBackClose";
+import TripManager from "../layout/TripManager.vue";
+import DevicePanel from "./DevicePanel.vue";
+import AlarmPanel from "./AlarmPanel.vue";
+import SettingsSection from "./SettingsSection.vue";
+import GoalsPanel from "./GoalsPanel.vue";
+import UnitsPanel from "./UnitsPanel.vue";
+import DialsPanel from "./DialsPanel.vue";
+import { useHelioStore } from "@/stores/helio";
+import { useUIStore } from "@/stores/ui";
+
+const emit = defineEmits(["close"]);
+useBackClose(() => emit("close"));
+
+const theme = useThemeStore();
+const checkin = useCheckinStore();
+const profile = useProfileStore();
+const ui = useUIStore();
+
+// Baked in by vite from android/version.properties, so what is on screen is the
+// same number as the APK on the releases page rather than a second one that can
+// drift. "dev" on a tree with no version file.
+const appVersion = __APP_VERSION__;
+// Opened on whichever section sent us here, so first run's SET IT UP NOW lands
+// on the strap panel already expanded rather than on nine collapsed rows.
+openSection.value = ui.settingsSection;
+
+// One-time, and stored rather than held in the store: it has to survive a
+// reload, and a flag that reset on every launch would be an explainer nobody
+// could get rid of.
+const INTRO_KEY = "atlas_settings_intro_seen";
+const showIntro = ref(localStorage.getItem(INTRO_KEY) !== "1");
+function dismissIntro() {
+  showIntro.value = false;
+  localStorage.setItem(INTRO_KEY, "1");
+}
+const trips = useTripsStore();
+const helio = useHelioStore();
+/** No future birthdays; the native picker enforces it rather than a message. */
+const todayIso = new Date().toISOString().slice(0, 10);
+const tripManagerOpen = ref(false);
+const SWATCH_COLORS = {
+  sentinel: "#4FE0FF",
+  ember: "#FFB000",
+  paper: "#C25E2A",
+  mission: "#0F62FE",
+};
+const SWATCH_BGS = {
+  sentinel: "#04080f",
+  ember: "#0c0803",
+  paper: "#f0e7d3",
+  mission: "#eef2f7",
+};
+function swatchColor(id) {
+  return SWATCH_COLORS[id];
+}
+function swatchBg(id) {
+  return SWATCH_BGS[id];
+}
+const activeTheme = computed(
+  () => THEMES.find((t) => t.id === theme.current) ?? THEMES[0]
+);
+
+const fileInput = ref(null);
+const backupMsg = ref("");
+/**
+ * The YOU panel's four fields, held as a draft until SAVE.
+ *
+ * Written straight through on every change event before, so a half-typed height
+ * was a stored height and nothing said whether an edit had taken. They describe
+ * one person and they are one decision.
+ */
+const youDraft = ref({
+  name: profile.name,
+  dob: profile.dob,
+  sex: profile.sex,
+  heightCm: profile.heightCm ?? "",
+});
+const youSaved = ref(false);
+
+const youDirty = computed(
+  () =>
+    youDraft.value.name !== profile.name ||
+    youDraft.value.dob !== profile.dob ||
+    youDraft.value.sex !== profile.sex ||
+    String(youDraft.value.heightCm ?? "") !== String(profile.heightCm ?? "")
+);
+
+function saveYou() {
+  profile.setName(youDraft.value.name);
+  profile.setDob(youDraft.value.dob);
+  profile.setSex(youDraft.value.sex);
+  profile.setHeight(youDraft.value.heightCm);
+  // Back off the store, not off the draft: `setHeight` range checks and can
+  // refuse, so echoing the draft would show a height that was not kept.
+  resetYou();
+  youSaved.value = true;
+  setTimeout(() => (youSaved.value = false), 1600);
+}
+
+function resetYou() {
+  youDraft.value = {
+    name: profile.name,
+    dob: profile.dob,
+    sex: profile.sex,
+    heightCm: profile.heightCm ?? "",
+  };
+}
+
+const pendingImport = ref(null);
+const restoring = ref(false);
+
+/**
+ * What is actually in the file, before it is trusted.
+ *
+ * A v1 backup has no archive section, so restoring one leaves every reading
+ * where it was while replacing everything else. That is a coherent thing to
+ * want and a terrible thing to discover afterwards.
+ */
+const importScope = computed(() => {
+  const file = pendingImport.value;
+  if (!file) return "";
+  const n = file.archive?.samples?.length;
+  return n
+    ? `INCLUDES ${n.toLocaleString("en-AU")} READINGS.`
+    : "SETTINGS AND LOGS ONLY. THIS FILE HAS NO SAMPLE ARCHIVE IN IT, SO YOUR READINGS WILL BE LEFT AS THEY ARE.";
+});
+
+async function doRestore() {
+  if (restoring.value) return;
+  restoring.value = true;
+  try {
+    // Awaited, and the button is held disabled meanwhile: a year of readings is
+    // written in chunks and the page reloads itself at the end, so a second tap
+    // would start a second restore over a half-finished one.
+    await applyBackup(pendingImport.value);
+  } catch (e) {
+    restoring.value = false;
+    backupMsg.value = `RESTORE FAILED: ${e?.message || e}`;
+  }
+}
+
+async function doExport() {
+  const res = await exportBackup();
+  backupMsg.value = res.msg;
+  // Errors can be a full sentence (the real exception text, not just
+  // "SEE CONSOLE") - give it long enough to actually read on a phone.
+  setTimeout(() => (backupMsg.value = ""), res.ok ? 3000 : 8000);
+}
+
+const v10Pending = ref(null);
+
+// One IMPORT button, routed by file type: .json restores an Atlas backup,
+// .xlsx runs the one-time v10 migration merge.
+async function onImportFile(e) {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file) return;
+  pendingImport.value = null;
+  v10Pending.value = null;
+  try {
+    if (/\.xlsx$/i.test(file.name)) {
+      v10Pending.value = await parseV10File(file);
+    } else {
+      pendingImport.value = await readBackupFile(file);
+    }
+  } catch (problem) {
+    const reason = (problem?.message ?? String(problem)).toUpperCase();
+    backupMsg.value = `IMPORT FAILED - ${reason}`;
+    setTimeout(() => (backupMsg.value = ""), 4000);
+  }
+}
+
+function doV10Merge() {
+  const res = mergeIntoCheckin(checkin, v10Pending.value);
+  v10Pending.value = null;
+  backupMsg.value = `MERGED ${res.datesTouched}/${res.datesInFile} DATES · ${res.fieldsFilled} FIELDS`;
+  setTimeout(() => (backupMsg.value = ""), 6000);
+}
+</script>
+
+<style scoped>
+.intro {
+  margin-bottom: 12px;
+  padding: 14px 16px 10px;
+  background: color-mix(in srgb, var(--acc) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--acc) 32%, transparent);
+  border-radius: 10px;
+}
+.intro .itext {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--body);
+}
+.idismiss {
+  margin-top: 8px;
+  margin-left: -6px;
+  min-height: 38px;
+  padding: 0 6px;
+  background: none;
+  border: 0;
+  color: var(--acc);
+  font-size: 10.5px;
+  letter-spacing: 1.8px;
+  cursor: pointer;
+}
+
+/* Uses .panel so it is the same surface as every section around it, and the
+   whole row is the button: a chevron or a small CTA inside a panel would make
+   the thing you must tap smaller than the thing you can see. */
+.tourrow {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.tourrow .trtitle {
+  font-size: 13px;
+  color: var(--acc);
+  letter-spacing: 0.5px;
+}
+.tourrow .trsub {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: var(--dim);
+}
+
+.page {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  /* Same gradient as the app behind it, anchored to the viewport, so moving
+     here does not read as a different surface. */
+  background-image: var(--page-bg);
+  background-size: 100vw 100vh;
+  background-position: 0 0;
+  background-repeat: no-repeat;
+  display: flex;
+  flex-direction: column;
+  /* Safe-area padding on the shell, never on the scrolling child: on the child
+     the inset scrolls away with the content and panels ride up under the
+     status icons. */
+  /* Matches every tab's own padding, so the avatar sits in the same place
+     before and after the page opens rather than jumping a few pixels. */
+  padding: calc(12px + env(safe-area-inset-top)) 18px
+    calc(20px + env(safe-area-inset-bottom));
+  overflow: hidden;
+  color: var(--body);
+  font-family: var(--font-sans);
+  animation: pagein 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes pagein {
+  from { opacity: 0; transform: translateY(8px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page { animation: none; }
+}
+.pscroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* .page already clips (overflow: hidden), so the overscan alone hides the
+     Android overlay scroll bar. See --sb-overscan in style.css. */
+  margin-right: calc(-1 * var(--sb-overscan));
+  padding-right: var(--sb-overscan);
+}
+.phd {
+  display: flex;
+  /* Top-aligned, not centred: it makes the avatar's top edge exactly the
+     page's padding top, which is the same origin Home anchors its chip to.
+     Centring would offset it by half the difference between the row height
+     and the circle. */
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.back {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--acc) 45%, transparent);
+  color: var(--acc);
+  font-size: 9px;
+  letter-spacing: 1.8px;
+  cursor: pointer;
+  position: relative;
+}
+.back svg {
+  width: 12px;
+  height: 12px;
+}
+/* The box is smaller than a 48dp target, so the target is extended outward
+   rather than by padding, which would inflate the box itself. */
+.back::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  min-width: 48px;
+  width: 100%;
+  height: 48px;
+  transform: translate(-50%, -50%);
+}
+.back:active {
+  background: color-mix(in srgb, var(--acc) 12%, transparent);
+}
+.back:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.prof {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.who {
+  text-align: right;
+  min-width: 0;
+}
+.avatar {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--acc);
+  color: var(--bg1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  cursor: pointer;
+  position: relative;
+}
+.avatar::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 48px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+}
+.avatar:active {
+  opacity: 0.75;
+}
+.avatar:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.pname {
+  font-size: 16px;
+  line-height: 1.2;
+  color: var(--ink);
+  /* A long name shortens rather than pushing the avatar off the row. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pmeta {
+  font-size: 8px;
+  letter-spacing: 1.4px;
+  color: var(--dim);
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.themerow {
+  display: flex;
+  gap: 10px;
+  margin-top: 2px;
+}
+.tdot {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border-width: 2px;
+  border-style: solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  opacity: 0.65;
+}
+.tdot.on {
+  opacity: 1;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--acc) 45%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--ink) 40%, transparent);
+  outline-offset: 2px;
+}
+.tcore {
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+}
+.tsub {
+  font-size: 9px;
+  letter-spacing: 2px;
+  margin-top: 8px;
+  color: var(--dim);
+}
+/* outranks the global .panel-hd span:last-child dim colour */
+/* Clear of the line above it: the button sat hard against the explainer. */
+.sexrow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.sexbtn {
+  flex: 1;
+  min-height: 44px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
+  font-size: var(--fs-micro);
+  letter-spacing: 1.4px;
+}
+.sexbtn.on {
+  color: var(--bg1);
+  background: var(--acc);
+  border-color: var(--acc);
+}
+.databtn.trips {
+  margin-top: 12px;
+}
+.panel-hd span.manage {
+  cursor: pointer;
+  color: var(--acc);
+}
+.btnrow {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.databtn {
+  flex: 1;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--acc);
+  border: 1px solid color-mix(in srgb, var(--acc) 40%, transparent);
+  padding: 8px 0;
+}
+.databtn.danger {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 50%, transparent);
+}
+.databtn:disabled {
+  opacity: 0.4;
+}
+.hidden-input {
+  display: none;
+}
+.confirm {
+  margin-top: 10px;
+  border-top: 1px dashed color-mix(in srgb, var(--acc) 25%, transparent);
+  padding-top: 8px;
+}
+.confirm .dim-text {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.dim-text {
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 400;
+}
+.dim-text.syncerr {
+  color: var(--bad);
+  margin-top: 4px;
+}
+.foot {
+  margin-top: auto;
+  padding-top: 18px;
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: var(--dim);
+  text-align: center;
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(28px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 700;
+  /* Wide enough that the routine sync results stay on one line. Failure
+     messages carry an arbitrary error string and may still wrap. */
+  max-width: 310px;
+  padding: 11px 18px;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-align: center;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--bg1) 92%, black);
+  border: 1px solid var(--acc);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--acc) 55%, transparent);
+}
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
+}
+
+.flabel {
+  display: block;
+  font-size: 9.5px;
+  letter-spacing: 1.4px;
+  color: var(--dim);
+  margin: 4px 0 5px;
+}
+.pfield {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding: 9px;
+  background: var(--bg0);
+  border: 1px solid color-mix(in srgb, var(--dim) 65%, transparent);
+  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.pfield:focus {
+  outline: none;
+  border-color: var(--acc);
+}
+
+/* A short field with its unit inside it. Sized to its content, because 178 in a
+   full-width box reads as the start of something longer. */
+.unitfield {
+  position: relative;
+  display: inline-block;
+  width: 118px;
+}
+.unitfield .pfield {
+  margin-bottom: 0;
+  padding-right: 34px;
+  text-align: left;
+}
+/* The number spinners are noise on a field with a fixed unit, and on Android
+   they eat a third of the width. */
+.unitfield .pfield::-webkit-outer-spin-button,
+.unitfield .pfield::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.unitfield .pfield[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.unitsuffix {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  color: var(--dim);
+  pointer-events: none;
+}
+.dim-note {
+  margin-top: 6px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  line-height: 1.6;
+  color: var(--dim);
+}
+</style>
