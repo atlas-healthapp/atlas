@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep every native surface the app's void colour so no system-default
+         grey can flash through during splash -> activity -> WebView handoff.
+         Pure black since 2026-08-06, matching Sentinel's bg1 token in
+         src/style.css: these two must stay in step or the handoff regains the
+         step this exists to remove. (No double hyphen in that token name here;
+         XML forbids it inside a comment and the build fails outright.) -->
+    <color name="colorPrimary">#000000</color>
+    <color name="colorPrimaryDark">#000000</color>
+    <color name="colorAccent">#4fe0ff</color>
+    <color name="voidbg">#000000</color>
+
+    <!-- The notification's family colours, and this file is the LIGHT shade.
+         Deliberately not read from atlas_theme_native: the app's theme and the
+         shade's theme are two different things, and Mission's INTAKE navy is
+         invisible on a dark shade. The resource system picks between this file
+         and values-night/ by the shade's own night mode, so nothing in Java
+         decides it. Values are lifted from the light-theme block in
+         src/style.css; the hexes there are measured for contrast and colour
+         blindness separation, so keep the two in step. -->
+    <color name="notif_body">#7c3aed</color>
+    <color name="notif_intake">#1e3a8a</color>
+    <color name="notif_activity">#0f766e</color>
+    <color name="notif_recovery">#a16207</color>
+
+    <!-- The unfilled part of a track, and an unearned routine dot: the same
+         colour carrying an alpha, so a bar always reads as one object. -->
+    <color name="notif_body_track">#3d7c3aed</color>
+    <color name="notif_intake_track">#3d1e3a8a</color>
+    <color name="notif_activity_track">#3d0f766e</color>
+    <color name="notif_recovery_track">#3da16207</color>
+
+    <color name="notif_hairline">#22000000</color>
+
+    <!-- Text, and it must NOT be ?android:attr/textColorPrimary. Inside a
+         RemoteViews layout a theme attribute resolves against whichever context
+         inflates it rather than against the notification's own theme, so on a
+         dark shade the text came out near-black on dark grey. Own colours, one
+         per file, is the only version that cannot resolve to the wrong thing. -->
+    <color name="notif_ink">#1b1b1f</color>
+    <color name="notif_dim">#5a5f66</color>
+</resources>

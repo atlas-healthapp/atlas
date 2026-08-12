@@ -1,0 +1,38 @@
+{
+  "name": "atlas",
+  "version": "0.1.0",
+  "description": "Atlas — daily life check-in",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "cap:sync": "npm run build && npx cap sync",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "release": "node scripts/release.mjs",
+    "publish": "node scripts/publish-public.mjs"
+  },
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "^8.1.0",
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/splash-screen": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.2",
+    "pinia": "^3.0.4",
+    "vue": "^3.5.34",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.3.1",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "fake-indexeddb": "^6.0.0",
+    "playwright": "^1.61.1",
+    "vite": "^8.0.11",
+    "vitest": "^3.2.0"
+  }
+}

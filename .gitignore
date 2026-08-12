@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.screenshots/
+.worktrees/
+.secrets/
+
+# The brainstorm mockups under .superpowers/ are tracked deliberately: design
+# decisions were made against them and no other copy exists, so leaving them
+# untracked meant they lived on exactly one machine. The tool's own runtime
+# state is not worth carrying, hence the exclusions rather than the whole tree.
+.superpowers/**/state/
+.superpowers/**/.last-*
+.superpowers/sdd/
+
+# The release signing key and its passwords. Losing the .jks is unrecoverable:
+# an APK signed with a different key cannot install over an existing one, and on
+# this app that means an uninstall, which takes the whole sample archive.
+# Back up the keystore itself somewhere that is not this repo.
+android/keystore.properties
+*.jks
+*.keystore

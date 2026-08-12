@@ -1,0 +1,575 @@
+/* ── Type ──────────────────────────────────────────────────────────────────
+   The body face is the platform's own: Roboto on Android, SF Pro on iOS. That
+   is what Bevel, MyFitnessPal, Cronometer and Zepp all do, and it buys system
+   text scaling for free. It replaced Rajdhani, which is a display face and was
+   doing body-text work: measured on the device it set the same string at 683px
+   where Roboto set it at 769, so it ran 11% narrow and every size read smaller
+   than its number.
+
+   IBM Plex Mono stays for labels and data, which is the one piece of Atlas's
+   own character worth keeping at text sizes, and it is bundled rather than
+   fetched. The whole stylesheet used to pull both faces from Google's CDN at
+   launch, so opening the app offline silently dropped everything to Roboto:
+   an offline-first health tracker cannot have its typography depend on a
+   network round trip. */
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-600.woff2") format("woff2");
+}
+
+/* ── Theme tokens ──────────────────────────────────────────────────────────
+   Every colour in the app reads from these custom properties. Switching
+   [data-theme] on <html> restyles the whole app instantly - this is the
+   mechanism proven in the round-4 design mockups (atlas-round4-artifact.html
+   in the design scratchpad). Sentinel (cyan) is the default. */
+:root,
+[data-theme="sentinel"] {
+  --acc: #4fe0ff;
+  --dim: #74bdd8;
+  --ink: #eaf9ff;
+  --body: #e3f3fb;
+  --bg0: #0a1622;
+  /* Pure black, so the launch screen and the app are the same colour and the
+     handoff has no step in it (2026-08-06). This is NOT the Obsidian theme
+     coming back: Obsidian was black everywhere including its surfaces, which
+     left a borderless card nothing to separate against. Only the page moves
+     here. --panel stays #0a1622, so a card separates further from the page than
+     it did before rather than less. */
+  --bg1: #000000;
+  /* Deliberately left above the page now, rather than below it. Its job is
+     sheets and the tab bar, which sit *over* the page, and "separate by
+     raising" is the same rule the light themes use. */
+  --bg2: #030509;
+  /* How a card separates from the page it sits on: the surface alone, with no
+     border and no corner brackets (2026-08-04, "option C" of three mocked up).
+     On a dark ground that means a real raised value rather than the 1.8% white
+     wash this used to be, because a wash that faint only read as a card while
+     a hairline was drawn around it. The light themes reach the same result
+     from the other side: see the note above their block.
+
+     --panel-line survives for hairlines *inside* a card, which are a different
+     job from the card's own edge. */
+  --panel: #0a1622;
+  --panel-line: color-mix(in srgb, var(--dim) 26%, transparent);
+  --panel-shadow: none;
+  --mark-track: 0.18;
+
+  /* Not theme values, but they live here because this block's `:root` half
+     matches on every theme. A second `:root` rule of their own would shadow
+     the family block below for anything parsing this file by selector. */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+
+  /* ── Type scale ────────────────────────────────────────────────────────
+     One place, because these were scattered across a dozen components and
+     drifted apart. The whole scale sat under both platform defaults (17pt
+     body on iOS, 16sp on Android) and under what Whoop, Zepp and Bevel use
+     for the same rows.
+
+     Set for the platform sans. They were first tuned against Rajdhani, which
+     ran 11% narrow, so if the body face ever changes again these want
+     re-checking rather than carrying over. */
+  --fs-value: 18px;
+  --fs-label: 12.5px;
+  --fs-cardhd: 13px;
+  --fs-prose: 16.5px;
+  --fs-second: 14.5px;
+  --fs-micro: 11px;
+  /* Bigger type in the same box is just cramped type. */
+  --row-h: 56px;
+  --row-label-w: 94px;
+  /* --good currently has no consumer (only --bad does). It is kept per theme
+     on purpose: it is the paired success token, and dropping it would leave
+     the next success state with nowhere to read a colour from, which is how
+     hardcoded hexes get in. Not dead code, reserved surface. */
+  --good: #3ddc84;
+  --bad: #ff5c5c;
+}
+
+[data-theme="ember"] {
+  --acc: #ffb000;
+  --dim: #e3b85c;
+  --ink: #fff3dc;
+  --body: #f8ead0;
+  --bg0: #1a1206;
+  --bg1: #0c0803;
+  --bg2: #080502;
+  --panel: #1a1206;
+  --good: #3ddc84;
+  --bad: #ff5c39;
+}
+
+/* ── Family tokens ─────────────────────────────────────────────────────────
+   Colour now says which domain a number belongs to, so it can no longer all
+   come from --acc. Three domain families plus one score colour:
+
+     BODY      sleep, HRV, resting HR, resp rate, SpO2, skin temp, weight
+     INTAKE    water, protein, fibre, creatine
+     ACTIVITY  steps, PAI, workouts, habits
+     RECOVERY  the score alone, which belongs to no family because it is
+               computed from several
+
+   These values are load-bearing and were chosen by measurement, not by eye.
+   Families are spaced in LUMINANCE as well as hue, because hue is exactly
+   what colour blindness removes: an earlier set separated them by hue alone
+   and BODY/INTAKE simulated 1.1 apart on the light themes, i.e. identical.
+   The current set separates under deuteranopia, protanopia and tritanopia on
+   every dark theme. Do not "tidy" these hexes without re-running that check.
+
+   Defined here for the dark grounds and overridden per light theme below.
+   See docs/superpowers/specs/2026-07-28-home-redesign-design.md. */
+:root {
+  --fam-body: #d8b4fe;
+  /* Lifted from #3b82f6 on 2026-07-31. The darker blue was legible as a bar
+     fill and muddy as small text on a near-black ground, which is why the Food
+     tab stayed painted with --acc for so long. This carries small text and is
+     still unmistakably the same blue. Measured: 7.2:1 on the worst dark ground,
+     63 from the nearest family under simulation. */
+  --fam-intake: #5b9df8;
+  /* Teal, not green. Green left the families when Recovery took the
+     red-amber-green ramp, because a green ACTIVITY card under a green
+     Recovery dial makes green mean two things at once. */
+  --fam-activity: #2dd4bf;
+  --fam-recovery: #fcd34d;
+  /* Gold as a gauge stroke only needs 3:1, but as a small label it needs
+     4.5:1, which it misses on both light themes. Dark grounds have no such
+     problem, so the two tokens are identical here and diverge below. */
+  --fam-recovery-ink: #fcd34d;
+
+  /* ── Macros ────────────────────────────────────────────────────────────
+     A sub-palette, not a fifth family. It is legal because it only ever
+     appears on the Food tab, where no other family is present to compete for
+     hue - the same licence that gives the sleep page four stage colours while
+     Home's sleep row stays violet. The rules it lives under: single-family
+     screen only, never another family's identity hue, family colour stays
+     dominant, and the sub-hues appear in one chart rather than across the page.
+
+     Protein has no token here: it *is* the family colour. It briefly had a
+     lifted blue of its own, and when INTAKE itself was lifted the two landed 12
+     apart under simulation, which is indistinguishable. Protein reading as the
+     family is the right answer anyway, since it is the metric the tab is built
+     around. Carbs and fat take pink and orange, the two hues no family owns.
+     These
+     exact values are measured, not chosen: pink #f472b6 against amber #f59e0b
+     simulated 34 apart under tritanopia, below the 40 the families are held to,
+     and the pair here clears 128. Fat is orange rather than the yellow that
+     scored highest, because gold is Recovery's identity and a near-gold fat
+     slice would be a trap the first time anything moves between screens.
+     Re-measure in families.test.js before touching them. */
+  --macro-carbs: #ec4899;
+  --macro-fat: #fdba74;
+
+  /* Recovery's band colours: the red-amber-green everyone already reads without
+     being taught. It is allowed to mean "how is it going" because Recovery is a
+     score rather than a domain, and only one is ever on screen.
+
+     Two measured constraints shaped these, not taste. STRONG is #4ade80 and not
+     the deeper #22c55e because red against a deep green simulates 7 apart under
+     deuteranopia, near enough identical: it is the lighter green's luminance,
+     not its hue, that keeps LOW and STRONG apart (56). And GOOD is #fbbf24
+     rather than the lighter #fcd34d because against that green the lighter gold
+     falls to 37 while this one holds 58.
+
+     The band label sits beside the colour everywhere it is used, so colour is
+     never the only channel. */
+  --rec-low: #f87171;
+  --rec-okay: #fbbf24;
+  --rec-good: #4ade80;
+  /* GREAT can only separate from GOOD by getting lighter, never deeper: a
+     darker green loses its distance from the LOW red under deuteranopia, which
+     is the constraint the whole ramp is built around. Pale would read as washed
+     out on its own, so the GREAT dial also gets a glow (see .dial.great). At
+     #5eff9b the two greens measured 79 apart; this is 124. */
+  --rec-great: #b9ffcf;
+  --rec-low-ink: #f87171;
+  --rec-okay-ink: #fbbf24;
+  --rec-good-ink: #4ade80;
+  --rec-great-ink: #b9ffcf;
+
+  /* Sleep stages. A detail sheet has only one metric in it, so hue is free to
+     encode structure within that metric rather than which family it is. REM
+     stays violet so the sheet still reads as descended from BODY, and AWAKE is
+     the only warm one so disruption reads as disruption without using red.
+     Depth is also carried by vertical position in the chart, never by colour
+     alone. */
+  --stage-deep: #6366f1;
+  --stage-light: #38bdf8;
+  --stage-rem: #e9d5ff;
+  --stage-awake: #fb923c;
+
+  /* Stress zones. Same licence as the sleep stages: a detail page holds one
+     metric, so nothing competes for hue and it is free to name the zones.
+     On Home stress stays violet, like every other BODY row.
+
+     Deliberately NOT the Recovery ramp, even though both run calm-to-alarming.
+     Recovery's red means "you are worse off"; a high stress reading is a state,
+     not a verdict, and reusing that red would import a judgement the number
+     does not make. Blue for calm rather than green keeps it clear of the
+     Recovery greens entirely. */
+  --stress-calm: #38bdf8;
+  --stress-mild: #a3e635;
+  --stress-moderate: #fbbf24;
+  --stress-high: #fb7185;
+}
+
+/* Light themes: same token contract, inverted values - ink/body become the
+   dark text colours, backgrounds go light. Components need no changes. */
+[data-theme="paper"] {
+  /* --acc/--dim are deliberately darker than a "true" mid-tone terracotta —
+     both are used as small/secondary text (panel labels, unselected tabs,
+     macro annotations) and must clear 4.5:1 against --bg1/--bg2, which the
+     original lighter values (c25e2a / 8a7455) did not (~3.5:1). */
+  --acc: #93431a;
+  --dim: #63512f;
+  --ink: #2a2119;
+  --body: #453a2d;
+  --bg0: #f6efe0;
+  --bg1: #f0e7d3;
+  --bg2: #e7dcc4;
+  /* Warm white rather than a wash of black. See the light-surface note below. */
+  --panel: #fdfaf2;
+  --good: #3f7d4f;
+  --bad: #b3402e;
+}
+
+[data-theme="mission"] {
+  /* darkened from the original 0f62fe/5f7186 for the same reason as Paper:
+     both sit under 4.5:1 against --bg1/--bg2 once you account for the
+     paler --bg2 surface, and both carry small secondary/label text. */
+  --acc: #0a52d6;
+  --dim: #4d6178;
+  --ink: #101722;
+  --body: #2b3949;
+  --bg0: #f7f9fc;
+  --bg1: #eef2f7;
+  --bg2: #e2e9f1;
+  --panel: #ffffff;
+  --good: #1f7d43;
+  --bad: #c8321e;
+}
+
+/* Light grounds take the dark end of every family. The dark-theme values are
+   tuned to sit bright on black and would fall under 3:1 here. Both light
+   themes share one set: they differ in accent, not in what a readable violet
+   on a pale ground is.
+
+   Gold is the one that splits into two tokens. As a gauge stroke it only owes
+   3:1, which #a16207 clears (4.00 on Paper, 4.38 on Mission). As a small
+   label it owes 4.5:1, which it misses on both, so labels take the darker
+   #8a5a0b (4.81 and 5.26). */
+/* Card surfaces on a light ground.
+ *
+ * The panels used to be a wash of black over the page, which measured 1.06:1
+ * against it on Mission: a grey card on a grey page, invisible. Contrast ratio
+ * is the wrong tool for fixing it, because the page is already near white and
+ * nothing legible can be only slightly lighter than that.
+ *
+ * So the mechanism changes rather than the number. The surface goes *up* to
+ * white while the page stays tinted and a soft shadow does the separating.
+ * That is the light-mode convention in both Material and HIG, and it is why
+ * the shadow token is none on the dark themes: there the lift alone is legible
+ * and a shadow on near-black is invisible anyway.
+ *
+ * The shadow is deeper than it was because it is now doing the whole job. The
+ * card edge went away with the border in 2026-08-04's container decision, so
+ * on a light ground the shadow is the only thing left saying where the card
+ * stops. */
+[data-theme="paper"],
+[data-theme="mission"] {
+  --panel-line: color-mix(in srgb, var(--dim) 40%, transparent);
+  --panel-shadow: 0 1px 2px rgba(16, 24, 40, 0.07), 0 4px 12px rgba(16, 24, 40, 0.09);
+  --mark-track: 0.3;
+
+  --fam-body: #7c3aed;
+  --fam-intake: #1e3a8a;
+  --fam-activity: #0f766e;
+  --fam-recovery: #a16207;
+  --fam-recovery-ink: #8a5a0b;
+
+  /* Deeper on a pale ground, the same way the families invert. Protein reads
+     the light INTAKE value, as it does on the dark themes. */
+  --macro-carbs: #86198f;
+  --macro-fat: #b45309;
+
+  /* Same split as gold: the stroke value owes 3:1, the label value 4.5:1, and
+     on a pale ground the bright dark-theme values clear neither. */
+  /* Inverted on a pale ground: here GREAT is the deepest, because depth is what
+     reads as "most" against light, the same way lightness does against dark. */
+  --rec-low: #be123c;
+  --rec-okay: #a16207;
+  --rec-good: #15803d;
+  --rec-great: #065f46;
+  --rec-low-ink: #9f1239;
+  --rec-okay-ink: #8a5a0b;
+  --rec-good-ink: #166534;
+  --rec-great-ink: #064e3b;
+
+  --stage-deep: #312e81;
+  --stage-light: #0e7490;
+  --stage-rem: #8b5cf6;
+  --stage-awake: #c2410c;
+
+  /* Added 2026-08-05. The stress zones were the one ramp that never got a
+     light set at all, so both light themes were drawing the dark values: MILD
+     measured 1.51:1 against a card and MODERATE 1.67, and these are used as
+     text (the hero number and the zone label) as well as as chart fills, so
+     4.5:1 is the bar and every one of them missed it.
+                             mission card / paper card / mission bg / paper bg
+       calm      #0369a1        5.93   5.69   5.28   4.82
+       mild      #4d7c0f        4.99   4.79   4.44   4.06
+       moderate  #b45309        5.02   4.81   4.47   4.08
+       high      #9f1239        8.02   7.68   7.13   6.52
+
+     Hue order is kept from the dark ramp (blue, green, orange, rose), and
+     blue still carries calm rather than green, so nothing here reads as
+     Recovery's verdict ramp. Colour-blind separation is weaker than the
+     families are held to, at 12 for the closest pair, but the dark ramp's own
+     closest pair is 11 and the argument is the same one recovery.js makes:
+     the zone label sits beside the colour everywhere it is used, so colour is
+     never the only channel. Locked in families.test.js. */
+  --stress-calm: #0369a1;
+  --stress-mild: #4d7c0f;
+  --stress-moderate: #b45309;
+  --stress-high: #9f1239;
+}
+
+* {
+  box-sizing: border-box;
+  /* The Android WebView paints a translucent blue rectangle over whatever was
+     tapped, sized to the element's box rather than its visible shape, so a
+     circular chip flashes as a square. Every control here already has its own
+     pressed state, which is the feedback that should be seen instead. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* Defined once and reused by .statusmask in App.vue. The mask used to paint a
+     flat --bg1 over the top strip, which is invisible when bg0 and bg1 are both
+     near-black but shows as a distinct band across the top of every light
+     theme, where they are genuinely different colours. */
+  --page-bg: radial-gradient(
+    120% 70% at 50% 0%,
+    var(--bg0) 0%,
+    var(--bg1) 55%,
+    var(--bg2) 100%
+  );
+  background: var(--page-bg);
+  color: var(--body);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* browser-default placeholders are unreadably faint on the void themes */
+input::placeholder,
+textarea::placeholder {
+  color: var(--dim);
+  opacity: 0.9;
+}
+select option {
+  background: var(--bg1);
+  color: var(--ink);
+}
+
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* No scroll bars anywhere. Every screen is a full-bleed panel and a track down
+   the right edge cuts the frame; scrolling here is gestural, so the bar costs
+   a stripe of the design and buys nothing.
+
+   These two hide it in a desktop browser, which is all the dev server needs,
+   and neither one works on the phone. Android's WebView draws *overlay* scroll
+   bars in the compositor: they occupy no layout width, and the engine reports
+   CSS.supports('scrollbar-width','none') === false while ignoring
+   ::-webkit-scrollbar for them entirely. Both verified over the DevTools
+   protocol against the device, not assumed. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+/* So the phone is handled by geometry instead: a scroller is made this much
+   wider than the box that clips it, and the compositor draws the bar past the
+   visible edge. Every scroller doing this pairs the negative margin with the
+   same value added back as padding, so the content box is unchanged. */
+:root {
+  --sb-overscan: 24px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* The wordmark, in one place.
+   Every screen had its own copy and they had drifted into four: Home set it at
+   22px / 5px tracking in the accent colour, Body and Fitness at 21px / 7px in
+   --ink, and Food added a glow the others did not have. It is the same three
+   letters on every screen, so it cannot be defined per screen.
+   Home still owns the fixed heights around it (see AppHeader/HomeTab) because
+   the wordmark shifted mid-boot on the real Android WebView; that is layout,
+   and this is type. */
+.wordmark {
+  font-family: var(--font-sans);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 7px;
+  color: var(--ink);
+  line-height: 1;
+  /* inline-flex on the BASELINE, so the peak's bottom edge sits on the text
+     baseline exactly as a cap would. Aligning on centre instead floats it. */
+  display: inline-flex;
+  align-items: baseline;
+}
+
+/* Formerly painted a faint square grid behind the top-level screens; the grid
+   was dropped 2026-07-25. The class stays as the positioning context its
+   users' absolutely positioned children already rely on. */
+.grid-bg {
+  position: relative;
+}
+
+/* One container treatment for the whole app (2026-08-04).
+ *
+ * This was the square accent edge with corner brackets, while HomeCard.vue
+ * drew a rounded hairline and three drill-throughs drew nothing at all: three
+ * answers to one question, split by when each screen was written rather than
+ * by what it is. Option C of three mocked up won: the surface alone separates,
+ * with no border and no brackets. `.card` in HomeCard.vue is the same rule and
+ * the two must stay in step.
+ *
+ * `position: relative` stays. The brackets are gone but absolutely positioned
+ * children inside panels are not. */
+.panel {
+  background: var(--panel);
+  border-radius: 10px;
+  box-shadow: var(--panel-shadow);
+  padding: 10px 13px 11px;
+  margin-bottom: 10px;
+  position: relative;
+}
+.panel-hd {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--acc);
+  margin-bottom: 7px;
+}
+.panel-hd span:last-child {
+  color: var(--dim);
+  letter-spacing: 1px;
+}
+
+/* The break between what a drill-through says about today and everything
+ * multi-day below it (2026-08-05).
+ *
+ * Lived in SleepPage's scoped styles while sleep was the only page with two
+ * halves. All five have them now, and five copies of a divider is exactly how
+ * the containers ended up with three treatments.
+ *
+ * Colour is left to the caller rather than being set here: a drill-through is
+ * one subject and therefore one family, so the divider takes that page's
+ * family colour the same way its cards do. The rule the app already runs on
+ * is that a page's marks agree with its header.
+ *
+ * The trailing rule is the part sleep did not have. "Readable at a glance" is
+ * the requirement, and a word on its own is a heading; a word with a line
+ * running off it is a seam. */
+.grouphd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* A wide gap above and a normal one below: the space is what says the page
+     has changed subject, and today's half is what it should be spent on. */
+  margin: 34px 0 0;
+  font-size: 11px;
+  letter-spacing: 3px;
+}
+.grouphd::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--panel-line);
+}
+
+/* The date stepper a drill-through puts in PageHeader's right slot.
+ *
+ * Global rather than scoped because the slot's contents belong to whichever
+ * page filled it, so PageHeader's own styles cannot reach them. Sleep,
+ * Recovery and Stress each carried a byte-identical copy of these rules; that
+ * is three places for one control to drift, which is the same mistake the
+ * header itself was extracted to fix. Sized with .back and .context. */
+.datetext {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 1.8px;
+  color: var(--dim);
+  min-width: 86px;
+  text-align: center;
+}
+.stepbtn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  cursor: pointer;
+}
+.stepbtn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

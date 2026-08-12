@@ -1,0 +1,135 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- The bezel. Roughly 48dp of custom content is all a collapsed notification
+     gets on Android 12+, so this drops the labels rather than dropping metrics:
+     the order never changes, and a strip read by position is learned in a week.
+     The expanded view (notif_expanded.xml) names all four.
+
+     Order is fixed and matches Home's dial row left to right. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:baselineAligned="false"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginEnd="10dp"
+        android:orientation="vertical">
+
+        <ProgressBar
+            android:id="@+id/bar_recovery"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:max="100"
+            android:progressDrawable="@drawable/notif_track"
+            android:progressTint="@color/notif_recovery"
+            android:progressBackgroundTint="@color/notif_recovery_track" />
+
+        <TextView
+            android:id="@+id/val_recovery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginEnd="10dp"
+        android:orientation="vertical">
+
+        <ProgressBar
+            android:id="@+id/bar_sleep"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:max="100"
+            android:progressDrawable="@drawable/notif_track"
+            android:progressTint="@color/notif_body"
+            android:progressBackgroundTint="@color/notif_body_track" />
+
+        <TextView
+            android:id="@+id/val_sleep"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginEnd="10dp"
+        android:orientation="vertical">
+
+        <ProgressBar
+            android:id="@+id/bar_routine"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:max="100"
+            android:progressDrawable="@drawable/notif_track"
+            android:progressTint="@color/notif_activity"
+            android:progressBackgroundTint="@color/notif_activity_track" />
+
+        <TextView
+            android:id="@+id/val_routine"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <ProgressBar
+            android:id="@+id/bar_protein"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:max="100"
+            android:progressDrawable="@drawable/notif_track"
+            android:progressTint="@color/notif_intake"
+            android:progressBackgroundTint="@color/notif_intake_track" />
+
+        <TextView
+            android:id="@+id/val_protein"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+</LinearLayout>
+

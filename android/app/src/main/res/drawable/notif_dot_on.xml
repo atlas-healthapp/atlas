@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A habit kept. Nine of these beside a tally is the one mark in the
+     notification that says nine separate things rather than a proportion. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="@color/notif_activity" />
+    <size android:width="6dp" android:height="6dp" />
+</shape>

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.CAMERA" />
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Keeps reading the strap while Atlas is closed. connectedDevice is the
+             foreground-service type Android 14+ requires for Bluetooth work. -->
+        <service
+            android:name=".ble.HelioSyncService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+        />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- MANAGE_EXTERNAL_STORAGE was here, to read Gadgetbridge's exported SQLite
+         file out of shared storage. It went with the relay on 2026-08-12.
+
+         Left as a note because it is a permission somebody will be tempted to
+         add back: **Play's permitted list for it is closed** (file managers,
+         backup, anti-virus, document management, on-device search, encryption,
+         device migration) and reading another app's database is not on it. The
+         old comment here reasoned that the restriction did not apply because
+         Atlas was sideloaded, which stops being true the moment it is not.
+
+         Nothing needs it now. The backup writes to Download through the
+         Filesystem plugin, which is scoped storage and needs no such thing. -->
+
+    <!-- Direct BLE link to the Helio Strap. BLUETOOTH_CONNECT is the Android 12+
+         runtime permission; the two below it are the pre-12 install-time
+         equivalents, capped so they don't apply on newer releases.
+         No scanning permission and no location permission: the strap is already
+         bonded, so it's looked up via getBondedDevices() rather than discovered.
+         usesPermissionFlags="neverForLocation" is therefore not needed either. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+    <!-- Background sync. A plain background service is killed within minutes and
+         WorkManager is deferred under Doze exactly when a long-idle phone most
+         needs a sync, so this runs in the foreground with a minimum-importance
+         notification. POST_NOTIFICATIONS is the Android 13+ runtime permission
+         that notification depends on. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- The smart alarm's checks, and nothing else in Atlas.
+
+         SCHEDULE_EXACT_ALARM rather than USE_EXACT_ALARM. The second is
+         auto-granted and never needs asking for, but Play restricts it to apps
+         whose core function IS an alarm clock or calendar, which Atlas is not:
+         this is one feature of a health app. The first is the honest one, and
+         its cost is that from API 33 it can be revoked and from API 34 it is
+         not granted by default, so the app has to notice and ask.
+
+         Without it setAlarmClock throws SecurityException, HelioSyncService
+         catches it and falls back to an inexact alarm, and the whole feature
+         quietly stops working - measured on this phone on 2026-08-12, where a
+         tick booked with setAndAllowWhileIdle carried a 22 minute window
+         against a 20 minute alarm window. That is why the fallback now records
+         itself in prefs instead of being silent. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+</manifest>
