@@ -211,6 +211,29 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
         listener.onLog(message);
     }
 
+    /**
+     * Whether a bonded device's name is this strap.
+     *
+     * **Not an exact match, because only one band was ever checked.** DEVICE_NAME
+     * is how the author's own unit advertises itself, and until 2026-08-13 the
+     * lookup was `DEVICE_NAME.equals(name)`. A public user on 1.0.5 then reported
+     * `no bonded device named "Amazfit Helio Strap"` with a perfectly good strap:
+     * Amazfit units commonly append a serial or MAC fragment, and Gadgetbridge
+     * prefix-matches this family for the same reason.
+     *
+     * Punctuation and case are dropped before comparing, so "Amazfit Helio Strap
+     * A2302", "amazfit helio strap" and "Amazfit-Helio-Strap" all match, while
+     * nothing else a person has bonded plausibly does - "helio" is distinctive
+     * enough that a phone, a car or a pair of earbuds will not collide with it.
+     *
+     * Static and package-private so it can be tested without a Bluetooth stack.
+     */
+    static boolean matchesStrapName(final String name) {
+        if (name == null) return false;
+        final String flat = name.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return flat.startsWith("amazfithelio") || flat.contains("heliostrap");
+    }
+
     /** Returns null with a logged reason rather than throwing, so the panel can show it. */
     private BluetoothDevice findBondedStrap() {
         final BluetoothManager manager = context.getSystemService(BluetoothManager.class);
@@ -224,15 +247,43 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
             return null;
         }
         if (!adapter.isEnabled()) {
-            log("! bluetooth is off");
+            log("! bluetooth is off, turn it on and try again");
             return null;
         }
-        for (final BluetoothDevice device : adapter.getBondedDevices()) {
-            if (DEVICE_NAME.equals(device.getName())) {
-                return device;
-            }
+
+        final java.util.Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+        BluetoothDevice loose = null;
+        for (final BluetoothDevice device : bonded) {
+            final String name = device.getName();
+            // An exact hit wins outright; anything looser is remembered in case
+            // nothing exact turns up, so a correctly named band is never passed
+            // over for one that merely resembles it.
+            if (DEVICE_NAME.equals(name)) return device;
+            if (loose == null && matchesStrapName(name)) loose = device;
         }
-        log("! no bonded device named \"" + DEVICE_NAME + "\"");
+        if (loose != null) {
+            log("matched \"" + loose.getName() + "\" as the strap (not the exact name)");
+            return loose;
+        }
+
+        // **What is bonded, not just what is missing.** One collapsed "device not
+        // found" covered four different causes and the first real report of it
+        // could not be diagnosed: nothing said whether the phone had no bond at
+        // all or a bond under an unexpected name. Those need opposite things from
+        // the user, so the log now names them.
+        if (bonded.isEmpty()) {
+            log("! nothing is paired to this phone in Android's Bluetooth settings");
+            log("! pair the strap there first - pairing it only in Zepp is not enough");
+            return null;
+        }
+        final StringBuilder names = new StringBuilder();
+        for (final BluetoothDevice device : bonded) {
+            if (names.length() > 0) names.append(", ");
+            final String name = device.getName();
+            names.append(name == null ? "(unnamed)" : name);
+        }
+        log("! no paired device looks like the strap");
+        log("paired on this phone (" + bonded.size() + "): " + names);
         return null;
     }
 
@@ -280,7 +331,13 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
         final BluetoothDevice device = findBondedStrap();
         if (device == null) {
             releaseLinkLock();
-            listener.onClosed("device not found");
+            // The log above says which of the four causes it was; this is the one
+            // line the person sees, so it names the action rather than the state.
+            // "device not found" was the whole content of the first public report
+            // of this and left the reporter with nothing to try.
+            listener.onClosed(
+                    "the strap is not paired to this phone. Pair it in Android's"
+                            + " Bluetooth settings first, then try again");
             return;
         }
         log("found bonded " + DEVICE_NAME + ", bond state " + bondStateName(device.getBondState()));

@@ -214,7 +214,11 @@ describe("helio sync lifecycle", () => {
       await store.sync(1).catch(() => null);
 
       const report = store.diagnosticReport();
-      expect(report).toContain("ATLAS test");
+      // vitest.config.js defines __APP_VERSION__ as a real version shape rather
+      // than the word "test", because updateCheck compares the running build
+      // against the newest release and an unparseable local version makes every
+      // such comparison vacuously false.
+      expect(report).toContain("ATLAS 1.0.0");
       expect(report).toContain("status 133");
       expect(report).toContain("connecting…");
     });

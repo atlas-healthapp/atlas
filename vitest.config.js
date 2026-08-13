@@ -12,7 +12,11 @@ export default defineConfig({
   // "__APP_VERSION__ is not defined" under test only - which is how the strap
   // diagnostic ended up untestable, since reporting the version is most of what
   // it does.
-  define: { __APP_VERSION__: JSON.stringify("test") },
+  // A real version shape, not the word "test". updateCheck compares the running
+  // build against the newest release, and an unparseable local version makes
+  // every such comparison vacuously false - so with "test" here the update tests
+  // passed by never comparing anything.
+  define: { __APP_VERSION__: JSON.stringify("1.0.0") },
   test: {
     environment: "node",
     // scripts/ as well as src/, because the publish audit is the one test whose

@@ -43,6 +43,7 @@ const DELIBERATELY_EXCLUDED = {
   atlas_theme_native: "written natively for the launch screen, mirrors atlas_theme",
   atlas_tour_seen: "a tour replaying once is not data loss",
   atlas_settings_intro_seen: "as above, for the settings explainer",
+  atlas_update_check: "a six-hour cache of the newest release, refetched on demand",
 };
 
 /**

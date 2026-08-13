@@ -29,6 +29,19 @@
       <div v-if="!playBoot && syncNote" class="sys mono" :class="{ warn: syncNote.warn }">
         {{ syncNote.text }}
       </div>
+      <!-- **Beside the sync state, not above the page.** A banner would be the
+           loudest thing on a screen whose job is the day's readings, and this is
+           an offer rather than a problem. Tapping opens Settings, where the row
+           carries the version and the link - Home says that there is one, the
+           page that can act on it says what it is. -->
+      <button
+        v-if="!playBoot && update"
+        class="sys mono updateflag"
+        type="button"
+        @click="ui.openSettings()"
+      >
+        UPDATE AVAILABLE
+      </button>
       <div v-if="playBoot" class="sys mono">{{ bootLine }}</div>
     </div>
 
@@ -362,6 +375,7 @@ import { useHelioStore } from "@/stores/helio";
 import { today, addDays, fmtTime, fmtHoursMins } from "@/utils/date";
 import { dailyValuesForRange } from "@/utils/dailyRollup";
 import { familyColor, familyInkColor } from "@/utils/families";
+import { cachedUpdate, checkForUpdate } from "@/utils/updateCheck";
 import {
   recoveryExplanation,
   recoveryColor,
@@ -798,6 +812,21 @@ const dateLabel = computed(() =>
 // complaint about silence. A **time** is not a permanent light: it changes with
 // every sync, and it answers the question the silence left open. So a current
 // strap now says when it last spoke, and only the wording changes as it ages.
+/**
+ * A newer release, checked once on mount and cached for six hours.
+ *
+ * **On Home rather than only in Settings**, because the person this is for is
+ * the one who does not know to go looking. A user on 1.0.5 sat with a strap that
+ * would not pair, and the fix existed the same day: the only way they would have
+ * learned was a personal message.
+ */
+const update = ref(cachedUpdate());
+onMounted(() => {
+  checkForUpdate().then((found) => {
+    update.value = found;
+  });
+});
+
 const syncNote = computed(() => {
   // **First, and ahead of every other state.** Opening the app fires
   // `helio.startup()` and a silent sync, and both read IndexedDB, so the page
@@ -1098,6 +1127,18 @@ onUnmounted(() => rafId && cancelAnimationFrame(rafId));
   font-size: var(--fs-label);
   letter-spacing: 1.6px;
   color: var(--dim);
+}
+/* Accent, not a warning colour: a newer version is an offer, not a fault. Sized
+   to the sys row it sits in so the header keeps one line. */
+.updateflag {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: var(--fs-label);
+  letter-spacing: 1.6px;
+  color: var(--acc);
+  cursor: pointer;
 }
 /* The accent, matching the bold label AppHeader gives every other tab: the date
    is what Home puts in that slot, and it read as a different kind of thing in

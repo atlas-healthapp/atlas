@@ -3,8 +3,10 @@
 A daily check-in app for Android that reads an **Amazfit Helio Strap** directly
 over Bluetooth and keeps its own archive on the phone.
 
-No account, no server, no telemetry. Nothing leaves the phone except a barcode
-lookup when you scan food.
+No account, no server, no telemetry. Two things leave the phone, both of them
+public lookups with nothing of yours attached: a barcode when you scan food, and
+a check against this repository's releases page for a newer version. No health
+data, no identifier, and no account is involved in either.
 
 **[⬇ Download Atlas](../../releases/latest/download/atlas.apk)** · Android 8.0 or
 newer · [what you need first](#before-you-download-it)

@@ -153,6 +153,21 @@ export const AGE_MIN = 20;
 export const AGE_MAX = 90;
 
 /**
+ * How far a fitness age may sit from a real one, in years.
+ *
+ * **A presentation limit, forced by the model's own precision.** Nes Table 3
+ * reports SEE 5.70 mL/kg/min for men, and the reference curve falls by only 0.19
+ * to 0.53 per year, so one standard deviation of error is worth eleven to thirty
+ * years. Uncapped, this told a sedentary 32-year-old he was 55 and an unusually
+ * fit one that he was 20, neither of which the estimate can support.
+ *
+ * 9.5 is Garmin's own floor for the same metric built on the same four inputs,
+ * applied symmetrically here. Nothing upstream is altered: VO2max, the terms and
+ * every itemised year are computed before this and are unaffected.
+ */
+export const MAX_GAP_YEARS = 9.5;
+
+/**
  * Days of resting-heart-rate rollups before a figure is allowed at all.
  *
  * Thirty, matching level.js's LEVEL_MIN_NIGHTS, and for the same reason: a
@@ -194,15 +209,27 @@ export const MAX_WEIGHT_AGE_DAYS = 90;
  */
 export const INPUT_REFERENCE = {
   /**
-   * 7.5 on the HUNT index is the published "meets the physical activity
-   * guidelines" anchor (Kurtze et al., Eur J Epidemiol 2008), and it falls out of
-   * the coding exactly: 2.5 frequency x 1.00 duration x 3 intensity.
+   * **10.5 on the New index, and it is derived rather than looked up** (corrected
+   * 2026-08-13 from 7.5, which was the wrong index's guideline threshold).
    *
-   * It is a threshold, not a cohort mean, and the label must say so. Calling it
-   * "average" would claim the average adult meets the guidelines, which is false
-   * nearly everywhere it has been measured.
+   * Nes 2011 never prints the cohort's mean New-index value - Table 1's 3.27 is
+   * the *Kurtze* index. But the paper gives everything needed to solve for it:
+   * Table 1's mean age, BMI, waist and resting HR, Table 1's measured mean
+   * VO2peak, and Table 3's coefficients. Setting the equation equal to the
+   * measured mean and solving for PA gives, across all four published models:
+   *
+   *     male waist 10.38   male bmi 10.29   female waist 10.51   female bmi 10.72
+   *
+   * Four independent equations agreeing inside 0.4 is not a coincidence, and at
+   * 10.5 every one of them reproduces the measured cohort mean to within 0.13.
+   * **That same arithmetic is what validates the BMI coefficients**, which appear
+   * in no publication - the paper ran the BMI model, reported "negligible
+   * alterations in R^2 and SEE", and printed only the waist equation.
+   *
+   * It is a cohort mean, so unlike the two thresholds below it genuinely does
+   * describe the average participant, and the label says so.
    */
-  pa: { value: 7.5, label: "MEETS THE GUIDELINES" },
+  pa: { value: 10.5, label: "THE STUDY'S AVERAGE" },
   /**
    * WHO waist action level 1: 94 cm for men, 80 cm for women. Also a threshold
    * rather than an average, and labelled as one.
@@ -281,7 +308,23 @@ export function ageForVo2max(vo2max, sex) {
 // ---------------------------------------------------------------------------
 
 /**
- * How the HUNT index is built: frequency x duration x intensity, 0.00 to 15.00.
+ * How the HUNT index is built: frequency x duration x intensity, 0.00 to 45.00.
+ *
+ * **Nes 2011 Table 4 publishes TWO indexes side by side and this is the second
+ * one** (corrected 2026-08-13; Atlas had built the first). The left column is
+ * Kurtze et al.'s older index, which maxes at 5 x 3 x 1 = 15. The right column is
+ * the index the authors developed for this paper, maxing at 3 x 10 x 1.5 = 45,
+ * and it is the one the coefficients were fitted on - Table 4 gives it the better
+ * correlation with measured VO2peak (R 0.44 against 0.38 in men, 0.39 against
+ * 0.34 in women). Feeding a Kurtze-scale value into a New-index coefficient
+ * under-credited activity by about 1.7 mL/kg/min, which the reference curve's
+ * ~0.35 per year slope turned into roughly five years of apparent age on every
+ * user.
+ *
+ * **The intensity column has a cliff and it is deliberate.** "Take it easy"
+ * scores 0, which zeroes the whole product whatever the frequency and duration.
+ * That is the paper's own finding, quoted: VO2peak "was similar if subjects
+ * reported to exercise at low intensity, independent of frequency and duration".
  *
  * **This is a reconstruction of the published input, not a stand-in for it.**
  * The index is literally that product, and Atlas holds all three quantities per
@@ -301,37 +344,54 @@ export function ageForVo2max(vo2max, sex) {
  * week more should show as a session a week more, not as nothing until a boundary
  * is crossed and then everything at once.
  */
+/** The New index's ceiling: 3 frequency x 10 intensity x 1.5 duration. */
+export const PA_INDEX_MAX = 45;
+
 const FREQUENCY_POINTS = [
+  // never / less than once a week both score 0 on the New index.
   [0, 0],
-  [0.5, 0.5],
+  [0.5, 0],
   [1, 1],
-  [2.5, 2.5],
-  [5, 5],
+  [2.5, 2],
+  [5, 3],
 ];
 
-/** Category midpoints in minutes against their published point values. */
+/** Category midpoints in minutes against their New-index point values. */
 const DURATION_POINTS = [
-  [10, 0.1],
-  [23, 0.38],
-  [45, 0.75],
-  [75, 1.0],
+  [10, 1],
+  [23, 1],
+  [45, 1.5],
+  [75, 1.5],
 ];
 
 /**
  * Intensity as a share of age-predicted maximum heart rate.
  *
- * The questionnaire's three answers are "easy, no sweat", "hard, out of breath"
- * and "near exhaustion". Those are placed on the HR scale at roughly 65, 78 and
- * 90 per cent of maximum, which is the conventional reading of them and is
- * **the softest assumption in this file** - it is the one place a published
- * category had to be mapped onto a measurement rather than reconstructed from
- * one. Worth revisiting against the user's own sessions once there are enough of
- * them to see where his easy and hard days actually sit.
+ * **The one place a published category has to be mapped onto a measurement**, and
+ * now the highest-stakes assumption in the file rather than merely the softest:
+ * the New index scores "take it easy" as 0 and that zeroes the entire product, so
+ * this mapping decides between full credit and none.
+ *
+ * The three answers are "take it easy, no sweat", "heavy breath and sweat" and
+ * "push near exhaustion". They are placed against ACSM's intensity
+ * classifications by percentage of maximum heart rate - light 57-63, moderate
+ * 64-76, vigorous 77-95, near-maximal >=96 - so "no sweat" tops out at light,
+ * "heavy breath and sweat" spans moderate to vigorous, and "near exhaustion"
+ * sits at the top.
+ *
+ * **Known to be unfair to a session with rests in it.** Atlas has only the
+ * session's mean heart rate, and a 47-minute climb spends a good part of itself
+ * belaying: measured on this archive the author's sessions average 63.5% of
+ * predicted maximum, which lands just above the "no sweat" anchor and scores his
+ * training near zero, while the sessions themselves are plainly not easy. Mean HR
+ * across a session is not the question the questionnaire asks. Time-above-a-
+ * threshold from the archive's own samples is the obvious better answer and is
+ * open work - see docs/backlog.md.
  */
 const INTENSITY_POINTS = [
-  [0.65, 1],
-  [0.78, 2],
-  [0.9, 3],
+  [0.63, 0],
+  [0.79, 5],
+  [0.93, 10],
 ];
 
 /**
@@ -436,7 +496,8 @@ export function paIndexFrom(sessions, { days = MIN_ACTIVITY_DAYS, age = null } =
 
   return {
     state: "ready",
-    value: clamp(frequency * duration * intensity, 0, 15),
+    // 0..45, the New index's range: 3 frequency x 10 intensity x 1.5 duration.
+    value: clamp(frequency * duration * intensity, 0, PA_INDEX_MAX),
     frequency,
     duration,
     intensity,
@@ -537,7 +598,9 @@ export function computeFitnessAge({
       needed: MIN_RESTING_HR_DAYS,
     });
   }
-  if (!num(paIndex) || paIndex < 0 || paIndex > 15) return missing("no-activity");
+  // 45, not 15: the New index's range. A 15 here silently rejected every genuinely
+  // active user once the index was corrected, which reads as "no activity data".
+  if (!num(paIndex) || paIndex < 0 || paIndex > PA_INDEX_MAX) return missing("no-activity");
   if (activityDays < MIN_ACTIVITY_DAYS) {
     return missing("calibrating-activity", { days: activityDays, needed: MIN_ACTIVITY_DAYS });
   }
@@ -564,17 +627,42 @@ export function computeFitnessAge({
   });
   const referenceFitted = ageForVo2max(referenceVo2, sex);
 
+  // **The gap is capped, and it is the model's own error bar that demands it.**
+  // Nes Table 3 puts the standard error of estimate at 5.70 mL/kg/min for men.
+  // The reference curve falls by only 0.19 to 0.53 per year depending where you
+  // land, so one standard deviation of the model's own error is worth somewhere
+  // between eleven and thirty years of "fitness age". Printing an uncapped
+  // integer claims a resolution the estimate has not got: measured before this
+  // cap, a sedentary 32-year-old read 55 and this archive's owner read 20.
+  //
+  // Garmin, whose fitness age takes the same four inputs, floors theirs at
+  // chronological age minus 9.5 for the same reason. Matching that, symmetrically,
+  // keeps a single believable year on screen instead of an error bar nobody can
+  // act on. It is a presentation limit and the page says so when it bites - it is
+  // NOT an offset applied to the underlying VO2max, which stays exactly as
+  // measured and is what every itemised term is still computed from.
+  const capped = clamp(
+    fitted.age,
+    Math.max(AGE_MIN, age - MAX_GAP_YEARS),
+    Math.min(AGE_MAX, age + MAX_GAP_YEARS)
+  );
+
   return {
     state: "ready",
     /** Which regression ran: "bmi" or "waist". The page must name it. */
     form,
     formLabel: model.label,
     vo2max,
-    fitnessAge: fitted.age,
+    fitnessAge: capped,
+    /** True when the reference curve ran out, ie a fitness it never measured. */
     clamped: fitted.clamped,
+    /** True when the +-9.5 presentation cap bit. Distinct from `clamped`. */
+    capped: capped !== fitted.age,
+    /** What the curve said before the cap, for the page that wants to explain it. */
+    uncappedAge: fitted.age,
     chronologicalAge: age,
     /** Negative is younger. What the page leads on. */
-    gap: fitted.age - age,
+    gap: capped - age,
     /** What someone the same age meeting every reference would read. */
     referenceAge: referenceFitted?.age ?? null,
     referenceVo2max: referenceVo2,

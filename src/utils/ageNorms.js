@@ -111,21 +111,46 @@ export function restingHrForAge(bpm, age, sex = null) {
     return { value: 0.1, label: "POOR", reference: row.belowAverage, approximate };
   }
 
-  // Walk up the ladder to the first category this reading falls inside, then
-  // place it within that category's span.
-  for (let i = 0; i < LADDER.length; i++) {
+  // **Walked best to worst, and the direction is the whole correctness of it.**
+  // Every figure in `row` is an upper bound, and the better the category the
+  // tighter that bound, so the category a reading belongs to is the BEST one it
+  // still fits under. Walking worst-first and taking the first fit let
+  // `belowAverage` - the loosest bound of the six - swallow every reading from
+  // the athlete threshold up to it. Measured on 2026-08-13: a 32-year-old man at
+  // 58, 62, 66, 70 and 74 bpm was told BELOW AVERAGE at all five, and the score
+  // climbed to 3.7 on a function documented as returning 0..1.
+  //
+  // **Five tests covered this and not one could see it**, which is worth more
+  // than the fix. Two asserted values at 44 and 95 bpm, both served by the early
+  // returns above, so they never reach this loop. One asserted the score rises as
+  // the rate falls, which the broken version also did. The male/female pair and
+  // the blended-midpoint test compared two readings that both went through the
+  // same wrong branch, so their relationship held. Nothing asserted a label in
+  // the middle of the range, and nothing asserted the documented upper bound.
+  // LADDER runs worst to best, so a HIGHER index is a better category with a
+  // tighter bound. Walking it downwards visits best first.
+  for (let i = LADDER.length - 1; i >= 0; i--) {
     const step = LADDER[i];
-    const upper = row[step.key];
-    if (bpm > upper) continue;
-    const lower = i === 0 ? row.belowAverage + 1 : row[LADDER[i - 1].key];
-    const below = i === 0 ? 0.1 : LADDER[i - 1].score;
-    const span = lower - upper;
-    // Nearer the top of the category scores nearer its ceiling.
-    const within = span > 0 ? (lower - bpm) / span : 1;
+    const worstBpm = row[step.key];
+    if (bpm > worstBpm) continue;
+
+    // This band runs from just inside the next-better category's bound up to its
+    // own. For AVERAGE on a 32-year-old man that is 70..74, ABOVE AVERAGE's
+    // bound being 69.
+    const better = LADDER[i + 1];
+    const bestBpm = (better ? row[better.key] : 0) + 1;
+    // A reading at the worst end of a band scores what the band below it tops
+    // out at; at the best end it scores this band's own figure.
+    const worseScore = LADDER[i - 1]?.score ?? 0.1;
+    const span = worstBpm - bestBpm;
+    // Clamped. An unclamped fraction is what turned a 0..1 score into 3.7 once
+    // the wrong category had been picked, and with the walk fixed the reading is
+    // inside the span by construction - so this is belt as well as braces.
+    const within = span > 0 ? Math.min(1, Math.max(0, (worstBpm - bpm) / span)) : 1;
     return {
-      value: below + (step.score - below) * within,
+      value: worseScore + (step.score - worseScore) * within,
       label: step.label,
-      reference: upper,
+      reference: worstBpm,
       approximate,
     };
   }

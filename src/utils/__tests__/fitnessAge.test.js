@@ -14,6 +14,8 @@ import {
   MIN_RESTING_HR_DAYS,
   MIN_ACTIVITY_DAYS,
   MAX_WEIGHT_AGE_DAYS,
+  MAX_GAP_YEARS,
+  AGE_MIN,
   AGE_MIN,
   AGE_MAX,
 } from "@/utils/fitnessAge";
@@ -149,22 +151,34 @@ describe("paIndexFrom", () => {
     expect(out.value).toBeUndefined();
   });
 
-  it("tops out at 15, the index's own ceiling", () => {
+  // **These two encoded the wrong index and are corrected, not relaxed.**
+  // Nes 2011 Table 4 publishes two indexes; Atlas was building Kurtze's (max 15)
+  // while the coefficients were fitted on the paper's own New index (max 45).
+  it("tops out at 45, the New index's own ceiling", () => {
     const many = Array.from({ length: 40 }, (_, i) => session(90, 190, i));
     const out = paIndexFrom(many, { days: 28, age: 34 });
-    expect(out.value).toBeLessThanOrEqual(15);
-    expect(out.value).toBeCloseTo(15, 5);
+    expect(out.value).toBeLessThanOrEqual(45);
+    expect(out.value).toBeCloseTo(45, 5);
   });
 
-  it("reproduces the published guideline anchor of 7.5", () => {
-    // 2.5 sessions a week x an hour or more x hard = the coding's own 7.5, which
-    // is what the literature calls meeting the guidelines.
-    const list = Array.from({ length: 10 }, (_, i) => session(75, 190, i));
+  it("builds the New index from Table 4's own weights", () => {
+    // Almost every day (3) x heavy breath and sweat (10) x 30-60 min (1.5) = 45,
+    // read straight off the right-hand column of Table 4.
+    const list = Array.from({ length: 20 }, (_, i) => session(45, 190, i));
     const out = paIndexFrom(list, { days: 28, age: 34 });
-    expect(out.frequency).toBeCloseTo(2.5, 5);
-    expect(out.duration).toBeCloseTo(1, 5);
-    expect(out.intensity).toBeCloseTo(3, 5);
-    expect(out.value).toBeCloseTo(7.5, 5);
+    expect(out.frequency).toBeCloseTo(3, 5);
+    expect(out.duration).toBeCloseTo(1.5, 5);
+    expect(out.intensity).toBeCloseTo(10, 5);
+  });
+
+  it("zeroes the whole index on easy sessions, however many there are", () => {
+    // The New index scores "take it easy" as 0 and that zeroes the product. It is
+    // the paper's own finding: VO2peak "was similar if subjects reported to
+    // exercise at low intensity, independent of frequency and duration".
+    const easy = Array.from({ length: 28 }, (_, i) => session(90, 100, i));
+    const out = paIndexFrom(easy, { days: 28, age: 34 });
+    expect(out.intensity).toBe(0);
+    expect(out.value).toBe(0);
   });
 
   it("takes the median session length, so one long ride is not the typical one", () => {
@@ -239,7 +253,71 @@ describe("computeFitnessAge withholding", () => {
     expect(computeFitnessAge({ ...ok, restingHr: 5 }).reason).toBe("no-resting-hr");
     expect(computeFitnessAge({ ...ok, weightKg: 400 }).reason).toBe("no-bmi");
     expect(computeFitnessAge({ ...ok, waistCm: 5 }).reason).toBe("no-waist");
-    expect(computeFitnessAge({ ...ok, paIndex: 20 }).reason).toBe("no-activity");
+    // 20 is a perfectly ordinary New-index value now (the cohort mean is 10.5 on
+    // a 0-45 scale), so the implausible figure has to be past 45.
+    expect(computeFitnessAge({ ...ok, paIndex: 50 }).reason).toBe("no-activity");
+    expect(computeFitnessAge({ ...ok, paIndex: 20 }).state).toBe("ready");
+  });
+});
+
+describe("the gap cap", () => {
+  const person = (age, bmi, rhr, pa) => ({
+    age,
+    sex: "male",
+    heightCm: 180,
+    weightKg: bmi * 1.8 * 1.8,
+    weightDaysOld: 1,
+    waistCm: null,
+    restingHr: rhr,
+    restingHrDays: 30,
+    paIndex: pa,
+    activityDays: 28,
+  });
+
+  it("never reports a gap wider than the model can support", () => {
+    // SEE is 5.70 mL/kg/min and the curve falls 0.19-0.53 per year, so one
+    // standard deviation is worth eleven to thirty years. Uncapped, these two
+    // read 55 and 20.
+    for (const p of [person(32, 29, 72, 0), person(32, 21.2, 50.3, 4.13)]) {
+      const out = computeFitnessAge(p);
+      expect(Math.abs(out.gap)).toBeLessThanOrEqual(MAX_GAP_YEARS + 1e-9);
+    }
+  });
+
+  it("leaves an ordinary person alone, so the cap is not doing the work", () => {
+    // The study-average man is inside the cap and must come out untouched, or
+    // the cap would be hiding a calibration problem rather than bounding a
+    // precision one.
+    const out = computeFitnessAge(person(32, 26.6, 57.4, 10.5));
+    expect(out.capped).toBe(false);
+    expect(out.fitnessAge).toBeCloseTo(out.uncappedAge, 10);
+    expect(out.gap).toBeLessThan(3);
+  });
+
+  it("says when it capped, and what the curve actually said", () => {
+    const out = computeFitnessAge(person(32, 29, 72, 0));
+    expect(out.capped).toBe(true);
+    expect(out.uncappedAge).toBeGreaterThan(out.fitnessAge);
+    expect(out.fitnessAge).toBeCloseTo(32 + MAX_GAP_YEARS, 10);
+  });
+
+  it("keeps the cap inside the reference curve's own range", () => {
+    // A 24-year-old cannot be capped to 14.5: AGE_MIN still wins.
+    const out = computeFitnessAge(person(24, 21, 48, 30));
+    expect(out.fitnessAge).toBeGreaterThanOrEqual(AGE_MIN);
+  });
+
+  it("does not touch the VO2max or the itemised terms", () => {
+    // The cap is presentation only. Every term is computed from the uncapped
+    // VO2max, so a capped headline must not silently rewrite the breakdown.
+    const p = person(32, 29, 72, 0);
+    const out = computeFitnessAge(p);
+    expect(out.capped).toBe(true);
+    const uncappedVo2 = computeFitnessAge({ ...p }).vo2max;
+    expect(out.vo2max).toBeCloseTo(uncappedVo2, 10);
+    const rows = fitnessAgeBreakdown(out);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(Number.isFinite(row.years)).toBe(true);
   });
 });
 
@@ -308,8 +386,14 @@ describe("computeFitnessAge arithmetic", () => {
 
   it("flags a figure that had to be clamped at the end of the reference data", () => {
     const out = computeFitnessAge({ ...ok, restingHr: 32, weightKg: 62, paIndex: 15 });
+    // Two different limits, and the distinction is the point. `clamped` says the
+    // reference curve ran out - a fitness the cohort never measured. `capped`
+    // says the +-9.5 presentation limit bit afterwards. Reading AGE_MIN here
+    // would mean the cap had not been applied.
     expect(out.clamped).toBe(true);
-    expect(out.fitnessAge).toBe(AGE_MIN);
+    expect(out.uncappedAge).toBe(AGE_MIN);
+    expect(out.capped).toBe(true);
+    expect(out.fitnessAge).toBeCloseTo(ok.age - MAX_GAP_YEARS, 10);
   });
 });
 

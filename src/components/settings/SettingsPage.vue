@@ -295,6 +295,25 @@
           <span class="trsub mono">A SHORT WALK THROUGH THE HOME SCREEN</span>
         </button>
 
+        <!-- **Only ever present when there is genuinely something newer**, so it
+             cannot become another permanent row nobody reads. It sits beside the
+             version rather than at the top of the page: somebody who has come
+             here to check what they are running is exactly who this answers.
+             There is no in-app installer - Atlas is a sideloaded APK - so the
+             honest action is "open the releases page". -->
+        <a
+          v-if="update"
+          class="panel updaterow"
+          :href="update.url"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span class="uptitle">ATLAS {{ update.latest }} IS AVAILABLE</span>
+          <span class="upsub mono">
+            YOU ARE ON {{ appVersion }} &middot; OPENS THE DOWNLOAD PAGE
+          </span>
+        </a>
+
         <div class="foot mono">ATLAS v{{ appVersion }}</div>
       </div>
     </div>
@@ -324,6 +343,7 @@ import { useCheckinStore } from "@/stores/checkin";
 import { useProfileStore } from "@/stores/profile";
 import { useTripsStore } from "@/stores/trips";
 import { exportBackup, readBackupFile, applyBackup } from "@/utils/backup";
+import { cachedUpdate, checkForUpdate } from "@/utils/updateCheck";
 import { parseV10File, mergeIntoCheckin } from "@/utils/v10import";
 import { useBackClose } from "@/composables/useBackClose";
 import TripManager from "../layout/TripManager.vue";
@@ -348,6 +368,15 @@ const ui = useUIStore();
 // same number as the APK on the releases page rather than a second one that can
 // drift. "dev" on a tree with no version file.
 const appVersion = __APP_VERSION__;
+
+/**
+ * A newer release, or null. Painted from the cache immediately so opening
+ * settings never waits on a network call, then refreshed in the background.
+ */
+const update = shallowRef(cachedUpdate());
+checkForUpdate().then((found) => {
+  update.value = found;
+});
 // Opened on whichever section sent us here, so first run's SET IT UP NOW lands
 // on the strap panel already expanded rather than on nine collapsed rows.
 openSection.value = ui.settingsSection;
@@ -572,6 +601,31 @@ function doV10Merge() {
   letter-spacing: 0.5px;
 }
 .tourrow .trsub {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: var(--dim);
+}
+
+/* The update row borrows the tour row's shape, because it is the same kind of
+   thing: one row, one action, no panel to open. It takes --acc rather than a
+   warning colour - a newer version is an offer, not a fault. */
+.updaterow {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 14px 16px;
+  text-decoration: none;
+  border: 1px solid color-mix(in srgb, var(--acc) 40%, transparent);
+}
+.updaterow .uptitle {
+  font-size: 13px;
+  color: var(--acc);
+  letter-spacing: 0.5px;
+}
+.updaterow .upsub {
   font-size: 10px;
   letter-spacing: 1.4px;
   color: var(--dim);
