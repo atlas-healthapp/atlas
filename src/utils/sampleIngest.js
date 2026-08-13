@@ -38,8 +38,8 @@ export async function watermarksFor(sourceId) {
  * Store samples, freeze the daily rollups they affect, then advance watermarks
  * and downsample. Returns the set of date keys this run touched.
  */
-export async function ingestSamples(samples, sourceId) {
-  await putSamples(samples);
+export async function ingestSamples(samples, sourceId, onProgress) {
+  await putSamples(samples, onProgress);
 
   // Freeze rollups for every date this import touched, while the samples
   // behind them are still at full resolution. This must happen before

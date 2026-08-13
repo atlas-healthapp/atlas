@@ -300,6 +300,19 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
     }
 
     public void disconnect() {
+        disconnect("closed by user");
+    }
+
+    /**
+     * @param reason what to report the close as. **It reaches a person**: the JS
+     *               side prints it verbatim under COULD NOT CONNECT, so the
+     *               single "closed by user" every caller used to share told
+     *               somebody whose Activity Android had just destroyed that they
+     *               had cancelled their own connect. That was the whole content
+     *               of the first public bug report and it pointed at the wrong
+     *               thing.
+     */
+    public void disconnect(final String reason) {
         // Told to stop before the link drops, so the band's sensor is not left
         // running and draining after we walk away.
         stopRealtimeHeartRate();
@@ -320,7 +333,7 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
             log("disconnected");
         }
         releaseLinkLock();
-        listener.onClosed("closed by user");
+        listener.onClosed(reason);
     }
 
     private static String bondStateName(final int state) {

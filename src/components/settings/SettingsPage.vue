@@ -307,7 +307,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, shallowRef } from "vue";
 
 /**
  * Which section is open, or null for none.
@@ -434,7 +434,26 @@ function resetYou() {
   };
 }
 
-const pendingImport = ref(null);
+/**
+ * **`shallowRef`, and the whole archive restore depends on it.**
+ *
+ * A plain `ref` makes what you assign to it *deeply* reactive, so every one of
+ * the ninety thousand rows inside a parsed backup came back out as a Vue Proxy.
+ * A Proxy cannot be structured-cloned, and structured clone is what IndexedDB
+ * uses, so `store.put(row)` threw `DataCloneError: ... could not be cloned` and
+ * the restore died on the first chunk. Nothing here needs the file to be
+ * reactive: the template reads a handful of fields off it, which a shallow ref
+ * still updates on assignment.
+ *
+ * **Nothing could have caught this in tests.** Every test uses fake-indexeddb,
+ * which does not implement the structured clone algorithm, so a proxy sails
+ * through it. And a v1 backup never touched IndexedDB at all, so the failure
+ * arrived with the v2 archive on 2026-08-12 and the archive half of the backup
+ * had never once worked on a real device until it was tried on 2026-08-13.
+ * `applyBackup` also unwraps defensively now, so a future caller reintroducing a
+ * deep ref does not silently break it again.
+ */
+const pendingImport = shallowRef(null);
 const restoring = ref(false);
 
 /**

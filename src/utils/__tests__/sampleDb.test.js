@@ -290,4 +290,94 @@ describe("downsampleOlderThan", () => {
     const second = await getSamples("stress", 0, BUCKET);
     expect(second).toEqual(first);
   });
+
+  // The test above proves the *data* does not change. It passed while this ran
+  // every 30 minutes over the entire back catalogue, deleting and re-putting
+  // every row to arrive at byte-identical values, because a rewrite to the same
+  // value is invisible from the outside. These two are about the writes.
+  it("writes nothing at all on a second run", async () => {
+    await putSamples([
+      { metric: "stress", t: 0, v: 10 },
+      { metric: "stress", t: 60000, v: 20 },
+    ]);
+    await downsampleOlderThan("stress", BUCKET, BUCKET);
+    const again = await downsampleOlderThan("stress", BUCKET, BUCKET);
+    expect(again).toEqual({ removed: 0, written: 0 });
+  });
+
+  it("rewrites only the bucket that has newly aged out", async () => {
+    // One bucket already collapsed by an earlier run, one still at full
+    // resolution because its day has only just passed the cutoff.
+    await putSamples([
+      { metric: "stress", t: 0, v: 10 },
+      { metric: "stress", t: 60000, v: 20 },
+    ]);
+    await downsampleOlderThan("stress", BUCKET, BUCKET);
+
+    await putSamples([
+      { metric: "stress", t: BUCKET + 1000, v: 40 },
+      { metric: "stress", t: BUCKET + 2000, v: 60 },
+    ]);
+    const res = await downsampleOlderThan("stress", BUCKET * 5, BUCKET);
+    // Two removed and one written: the fresh bucket only. The settled one is
+    // left alone rather than being deleted and re-put at the same value.
+    expect(res).toEqual({ removed: 2, written: 1 });
+
+    const got = await getSamples("stress", 0, BUCKET * 5);
+    expect(got.map((s) => s.t)).toEqual([0, BUCKET]);
+    expect(got.map((s) => s.v)).toEqual([15, 50]);
+  });
+
+  it("still collapses a bucket whose only sample is off the boundary", async () => {
+    // One sample, so `count` is 1, but it does not sit on its bucket start:
+    // that is real un-downsampled data, not a previous run's output, and
+    // treating the count alone as the signal would strand it at full resolution
+    // forever.
+    await putSamples([{ metric: "stress", t: 60000, v: 33 }]);
+    const res = await downsampleOlderThan("stress", BUCKET, BUCKET);
+    expect(res).toEqual({ removed: 1, written: 1 });
+    const got = await getSamples("stress", 0, BUCKET);
+    expect(got).toEqual([{ metric: "stress", t: 0, v: 33 }]);
+  });
+});
+
+describe("putSamples chunking", () => {
+  // The ingest path hands this tens of thousands of rows on a first connect,
+  // and it used to be one transaction wrapping one synchronous loop. Split into
+  // batches now, so the boundary is worth a test: an off-by-one in the slicing
+  // would silently drop or duplicate rows in the archive.
+  it("writes every sample across several chunks", async () => {
+    const samples = Array.from({ length: 4501 }, (_, i) => ({
+      metric: "hr",
+      t: i * 1000,
+      v: i % 200,
+    }));
+    const written = await putSamples(samples);
+    expect(written).toBe(4501);
+
+    const got = await getSamples("hr", 0, 4501 * 1000);
+    expect(got).toHaveLength(4501);
+    expect(got[0]).toEqual({ metric: "hr", t: 0, v: 0 });
+    expect(got[4500]).toEqual({ metric: "hr", t: 4500000, v: 4500 % 200 });
+  });
+
+  it("reports progress that ends on the total", async () => {
+    const samples = Array.from({ length: 4501 }, (_, i) => ({
+      metric: "hr",
+      t: i * 1000,
+      v: 1,
+    }));
+    const seen = [];
+    await putSamples(samples, (doneCount, total) => seen.push([doneCount, total]));
+    expect(seen.length).toBeGreaterThan(1);
+    // Never overruns the total, which is what a naive `start + CHUNK` would do
+    // on the last, short batch and would print "SAVING 6000 OF 4501".
+    expect(seen.every(([d, total]) => d <= total)).toBe(true);
+    expect(seen.at(-1)).toEqual([4501, 4501]);
+  });
+
+  it("still returns 0 for nothing to write", async () => {
+    expect(await putSamples([])).toBe(0);
+    expect(await putSamples(null)).toBe(0);
+  });
 });

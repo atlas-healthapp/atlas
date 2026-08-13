@@ -65,16 +65,59 @@ function done(request) {
   });
 }
 
-export async function putSamples(samples) {
+/**
+ * How many samples go in one transaction. Small enough that the gap between
+ * batches lands within a frame, large enough that the per-transaction overhead
+ * stays negligible against the puts themselves.
+ */
+const PUT_CHUNK = 2000;
+
+/**
+ * Hand the thread back long enough for the browser to paint.
+ *
+ * An awaited IndexedDB transaction already yields, but only to the task queue,
+ * and a run of back-to-back transactions can starve rendering for as long as it
+ * lasts. A timeout is a fresh task the compositor can get in front of.
+ */
+function yieldToPaint() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * **Chunked, and the chunking is not an optimisation.**
+ *
+ * This was one transaction wrapping a single tight loop over every sample. A
+ * first connect hands it tens of thousands of readings, and that loop is
+ * synchronous main-thread work: the WebView stops painting and
+ * requestAnimationFrame stops firing for the whole of it. That is what froze
+ * Home's boot mid-sequence (the dials had arrived, the cards had not, and the
+ * clock driving them is a rAF loop) and what made a first connect look hung
+ * after it said SAVING.
+ *
+ * **A partial write is already safe, which is what licenses the split.** Samples
+ * are keyed [metric, t], so replaying one is an overwrite rather than a
+ * duplicate, and `ingestSamples` only advances the watermark once the rollups
+ * behind them are frozen. An interrupted run is therefore re-imported by the
+ * next sync, not lost.
+ *
+ * @param onProgress optional, called with (done, total) after each batch.
+ */
+export async function putSamples(samples, onProgress) {
   if (!samples || samples.length === 0) return 0;
   const db = await openSampleDb();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(SAMPLES, "readwrite");
-    const store = transaction.objectStore(SAMPLES);
-    for (const s of samples) store.put(s);
-    transaction.oncomplete = () => resolve(samples.length);
-    transaction.onerror = () => reject(transaction.error);
-  });
+  for (let start = 0; start < samples.length; start += PUT_CHUNK) {
+    const batch = samples.slice(start, start + PUT_CHUNK);
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(SAMPLES, "readwrite");
+      const store = transaction.objectStore(SAMPLES);
+      for (const s of batch) store.put(s);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    onProgress?.(start + batch.length, samples.length);
+    await yieldToPaint();
+  }
+  return samples.length;
 }
 
 export async function getSamples(metric, fromMs, toMs) {
@@ -176,13 +219,33 @@ export async function downsampleOlderThan(metric, cutoffMs, bucketMs = 900000) {
   const buckets = new Map();
   for (const s of old) {
     const key = Math.floor(s.t / bucketMs) * bucketMs;
-    const bucket = buckets.get(key) ?? { total: 0, count: 0 };
+    // `exact` records whether a sample already sits on the bucket boundary,
+    // which together with a count of one is the signature of an earlier run's
+    // own output. Tracked while bucketing rather than derived after, since the
+    // originals are not kept per bucket.
+    const bucket = buckets.get(key) ?? { total: 0, count: 0, exact: new Set() };
     bucket.total += s.v;
     bucket.count += 1;
+    if (s.t === key) bucket.exact.add(key);
     buckets.set(key, bucket);
   }
 
-  const collapsed = [...buckets.entries()].map(([t, b]) => ({
+  // **Only the buckets that are not already collapsed.** A bucket holding one
+  // sample sitting exactly on its own boundary is the output of a previous run,
+  // and rewriting it produces byte-identical data. This ran over every sample
+  // older than the window on *every* sync, thirty minutes apart, deleting and
+  // re-putting the entire back catalogue to arrive where it started - which is
+  // both halves of the deferred perf ticket's second sentence. In the steady
+  // state the only dirty buckets are the ones belonging to the day that has just
+  // aged out, so this now writes a few dozen rows instead of the whole archive.
+  const dirty = [...buckets.entries()].filter(
+    ([t, b]) => b.count > 1 || !b.exact.has(t)
+  );
+  if (dirty.length === 0) return { removed: 0, written: 0 };
+
+  const dirtyKeys = new Set(dirty.map(([t]) => t));
+  const stale = old.filter((s) => dirtyKeys.has(Math.floor(s.t / bucketMs) * bucketMs));
+  const collapsed = dirty.map(([t, b]) => ({
     metric,
     t,
     v: Math.round((b.total / b.count) * 10) / 10,
@@ -192,13 +255,13 @@ export async function downsampleOlderThan(metric, cutoffMs, bucketMs = 900000) {
   await new Promise((resolve, reject) => {
     const transaction = db.transaction(SAMPLES, "readwrite");
     const store = transaction.objectStore(SAMPLES);
-    for (const s of old) store.delete([metric, s.t]);
+    for (const s of stale) store.delete([metric, s.t]);
     for (const s of collapsed) store.put(s);
     transaction.oncomplete = resolve;
     transaction.onerror = () => reject(transaction.error);
   });
 
-  return { removed: old.length, written: collapsed.length };
+  return { removed: stale.length, written: collapsed.length };
 }
 
 /**

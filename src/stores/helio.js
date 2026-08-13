@@ -123,6 +123,56 @@ export const useHelioStore = defineStore("helio", () => {
   const liveActive = computed(() => liveWatchers.value > 0);
   let liveHandle = null;
 
+  /**
+   * The BLE exchange, collected whether or not anything is looking at it.
+   *
+   * **In the store rather than in the panel, and that is the whole fix.** The
+   * log lived in `DevicePanel`, inside the branch that only renders once
+   * `connected` is true - so the one person who most needs it, somebody whose
+   * very first connect is failing, could not reach it at all. A buffer attached
+   * when a panel opens also starts empty, which means it never contains the
+   * attempt that made you go looking for it.
+   *
+   * Bounded: a deep fetch emits hundreds of lines and the oldest are the least
+   * interesting.
+   */
+  const logLines = ref([]);
+  const LOG_MAX = 300;
+
+  try {
+    HelioBle.addListener("bleLog", (event) => {
+      const at = new Date().toLocaleTimeString("en-GB", { hour12: false });
+      const mark = event.event === "authFailed" || event.event === "error" ? "! " : "";
+      logLines.value.push(`${at} ${mark}${event.message ?? event.event}`);
+      if (logLines.value.length > LOG_MAX) {
+        logLines.value.splice(0, logLines.value.length - LOG_MAX);
+      }
+    });
+  } catch {
+    // No native plugin (the dev server), so there is no exchange to log.
+  }
+
+  /**
+   * Everything needed to diagnose a failure, as one block of text to send.
+   *
+   * **The pairing key is never in it.** It is the one secret in the app, it is
+   * unrecoverable without the vendor's app, and a diagnostic people are told to
+   * paste to a stranger is precisely where it must not appear. Nothing else here
+   * identifies anybody: it is a version string, an error and a byte trace.
+   */
+  function diagnosticReport() {
+    return [
+      `ATLAS ${__APP_VERSION__}`,
+      `DEVICE ${globalThis.navigator?.userAgent ?? "unknown"}`,
+      `WHEN ${new Date().toISOString()}`,
+      `CONNECTED ${connected.value}`,
+      `LAST SYNC ${lastSyncAt.value ? new Date(lastSyncAt.value).toISOString() : "never"}`,
+      `ERROR ${lastSyncError.value ?? "none"}`,
+      "",
+      ...logLines.value,
+    ].join("\n");
+  }
+
   function setAuthKey(key) {
     const next = (key ?? "").trim();
     // Ignore an empty write. The panel calls this on mount and on every
@@ -336,10 +386,9 @@ export const useHelioStore = defineStore("helio", () => {
             // Already gone. Nothing useful to do, and it must not mask a real error.
           }
         }
-        syncing.value = false;
-        syncPhase.value = null;
-
         if (error) {
+          syncing.value = false;
+          syncPhase.value = null;
           // Something else holds the link (live heart rate, most likely). The
           // band takes one central at a time, so this is a "not now", not a
           // fault: recording it as a sync error would turn the device panel red
@@ -354,6 +403,16 @@ export const useHelioStore = defineStore("helio", () => {
           return;
         }
 
+        // **`syncing` deliberately stays true through everything below, and is
+        // cleared once in the `finally`.** The link is closed by this point but
+        // the sync is not over: committing sleep, ingesting samples and freezing
+        // rollups is seconds of main-thread work on a first connect, and it is
+        // the part that actually blocks. Clearing the flag before it left every
+        // screen keying on `syncing` going silent at exactly the moment the app
+        // stopped responding - Home's sync line vanished and StrapConnect's
+        // button reverted from CONNECTING… to CONNECT, over a connect that was
+        // still running. Reported both times as the app freezing, which is the
+        // right reading of a screen that says it is idle while it is not.
         try {
           // Sleep is committed before any IndexedDB work, exactly as the
           // Gadgetbridge path does it, so a storage failure can never regress a
@@ -368,7 +427,14 @@ export const useHelioStore = defineStore("helio", () => {
           if (workouts.length) counts.workouts = workouts.length;
           lastCounts.value = counts;
 
-          const touched = await ingestSamples(samples, SOURCE_ID);
+          // Named with the figure, because this is the long one: a first connect
+          // ingests tens of thousands of readings and a bare SAVING for half a
+          // minute is indistinguishable from a hang.
+          syncPhase.value = `SAVING · ${samples.length} READINGS`;
+          const touched = await ingestSamples(samples, SOURCE_ID, (done, total) => {
+            syncPhase.value = `SAVING · ${done} OF ${total}`;
+          });
+          syncPhase.value = "SAVING SESSIONS";
           const workoutDates = await commitWorkouts(workouts);
 
           lastSyncAt.value = Date.now();
@@ -384,6 +450,9 @@ export const useHelioStore = defineStore("helio", () => {
         } catch (e) {
           lastSyncError.value = e.message ?? String(e);
           reject(e);
+        } finally {
+          syncing.value = false;
+          syncPhase.value = null;
         }
       };
 
@@ -425,7 +494,11 @@ export const useHelioStore = defineStore("helio", () => {
           // A close before fetchComplete means the band went away mid-sync.
           // Whatever arrived first is still good, so it is kept rather than
           // discarded, but the run is reported as incomplete.
-          finish(new Error("link closed: " + (event.message ?? "unknown")));
+          // The reason is printed to a person verbatim under COULD NOT CONNECT,
+          // so it is not prefixed with "link closed" any more: the native side
+          // now sends a sentence rather than a token, and "LINK CLOSED: ATLAS WAS
+          // CLOSED BY ANDROID" says the same thing twice with the jargon first.
+          finish(new Error(event.message || "the link to the strap closed"));
         }
       })
         .then(async (handle) => {
@@ -601,11 +674,30 @@ export const useHelioStore = defineStore("helio", () => {
    */
   const connecting = ref(false);
 
+  /**
+   * Talking to the strap right now, for any screen that has to get out of the way.
+   *
+   * **One definition, because two screens hide different things on it.**
+   * `StrapConnect` swaps its form for the progress panel, and first run hides the
+   * wordmark, the question and the LATER button so the panel is alone. Each
+   * working it out from `syncing || connecting` separately is how one of them
+   * ends up flickering back a beat before the other, which is the class of bug
+   * this whole session started with.
+   */
+  const busy = computed(() => syncing.value || connecting.value);
+
   async function connect(key) {
     if (key) setAuthKey(key);
     connecting.value = true;
     try {
       const res = await sync(30);
+      // **`sync` resolves null rather than throwing in two cases**: a sync was
+      // already running, and the link was busy. Both used to fall straight
+      // through to success here, and `{ ok: true, ...null }` is `{ ok: true }`,
+      // so the panel read `res.days` off nothing and flashed "CONNECTED.
+      // UNDEFINED DAYS IMPORTED" for a connect that never happened - and marked
+      // the strap connected on the strength of it.
+      if (!res) throw new Error("the strap was busy, try again in a moment");
       _setConnected(true);
       // Never fail a connect that worked because the service would not start.
       // Android refuses a foreground-service start whenever it does not
@@ -757,6 +849,9 @@ export const useHelioStore = defineStore("helio", () => {
     lastCounts,
     syncPhase,
     connecting,
+    busy,
+    logLines,
+    diagnosticReport,
     liveHeartRate,
     liveActive,
     alarm,

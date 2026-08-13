@@ -1,3 +1,4 @@
+﻿import { toRaw } from "vue";
 import { load, persist } from "@/utils/storage";
 import { today } from "@/utils/date";
 import { exportArchive, importArchive } from "@/utils/sampleDb";
@@ -47,12 +48,35 @@ const KEYS = {
   trips: "atlas_trips",
   alarm: "atlas_helio_alarm",
   showAllVitals: "atlas_show_all_vitals",
+  // **Both shipped on 2026-08-12, the same day as this file, and both were
+  // missed.** Found on 2026-08-13 by taking a census of the real phone and
+  // reading it against this list rather than reading this list on its own. They
+  // are settings a person sat down and chose - the eight daily targets, and
+  // which three dials Home shows - so losing them to a restore is the exact
+  // failure v2 was written to end.
+  goals: "atlas_goals",
+  homeLayout: "atlas_home_layout",
+  // Found by the same census. Weight, height, distance and temperature: a
+  // preference set once in Settings, and a restore that silently put somebody
+  // back on kilograms would look like the app losing their weight history
+  // rather than losing one setting.
+  units: "atlas_units",
   // **The only value in Atlas that cannot be recovered from the device or the
   // band.** It is issued by the vendor during account binding and there is no
   // way to read it back off the strap, so an uninstall without it in hand means
   // going through the extraction again. It being here does mean the export file
   // holds a secret, which is why the export button says so.
   helioAuthKey: "atlas_helio_authkey",
+  // **The one migration flag that is carried, and the exception proves the rule
+  // above.** The others gate repairs that are additive: re-running the sleep or
+  // heart-rate backfill on restored data writes nothing it does not already
+  // agree with. `migrateWorkoutTimezoneFix` is not additive - it calls
+  // `clearWorkouts()`. Left out, a restore would put the workouts back and then
+  // the first launch after reconnecting the strap would delete every one of
+  // them, orphaning every session annotation joined to them on `startMillis`,
+  // which is hand-entered and not refetchable. Found on 2026-08-13 while
+  // planning the package migration this file exists to make survivable.
+  workoutTzFixed: "atlas_helio_workout_tz_fixed_2026_07_28",
 };
 
 async function buildBackup() {
@@ -108,12 +132,26 @@ function validateBackup(obj) {
 // state nothing downstream can detect: the next sync would fetch from the
 // watermark and never notice the gap underneath it.
 export async function applyBackup(obj) {
+  // **Unwrapped before anything else, because IndexedDB cannot take a Proxy.**
+  // A caller holding the parsed file in a plain Vue `ref` hands over an object
+  // whose every nested row is reactive, and structured clone - which is how
+  // IndexedDB stores a value - refuses a Proxy outright with "could not be
+  // cloned". `toRaw` returns the original parsed graph, and reading through it
+  // never mints a proxy, so this one line covers the whole archive.
+  //
+  // The caller was fixed too (`SettingsPage` uses a `shallowRef`). This is here
+  // because it is the boundary: a util that writes to IndexedDB should not
+  // depend on every future caller remembering. It cost the archive restore
+  // never having worked once on a real device between 2026-08-12 and
+  // 2026-08-13, and no test could see it because fake-indexeddb does not
+  // implement structured clone.
+  const backup = toRaw(obj);
   for (const [name, key] of Object.entries(KEYS)) {
-    if (obj.data[name] != null) persist(key, obj.data[name]);
+    if (backup.data[name] != null) persist(key, toRaw(backup.data[name]));
   }
   // Absent from a v1 file, and from a v2 whose archive read failed. Restoring
   // the keys alone is still the right thing to do in both cases.
-  if (obj.archive) await importArchive(obj.archive);
+  if (backup.archive) await importArchive(toRaw(backup.archive));
   location.reload();
 }
 
@@ -123,9 +161,9 @@ export async function applyBackup(obj) {
  * thing you only discover when you need it.
  */
 function archiveNote(backup, ok) {
-  if (!backup.archive) return `${ok} · WITHOUT THE ARCHIVE`;
+  if (!backup.archive) return `${ok} Â· WITHOUT THE ARCHIVE`;
   const n = backup.archive.samples?.length ?? 0;
-  return `${ok} · ${n.toLocaleString("en-AU")} READINGS`;
+  return `${ok} Â· ${n.toLocaleString("en-AU")} READINGS`;
 }
 
 // Export: Capacitor Filesystem to Downloads on native Android (same runtime

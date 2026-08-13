@@ -33,8 +33,19 @@ const { useHelioStore } = await import("@/stores/helio");
 
 const AUTH_KEY = "00112233445566778899aabbccddeeff";
 
-/** The events the plugin would push; a test can fire them by hand. */
-let emit;
+/**
+ * The events the plugin would push; a test can fire them by hand.
+ *
+ * **Fanned out to every registered listener**, which is what Capacitor does and
+ * what this mock used not to do: it kept only the most recent callback, so once
+ * the store began attaching a permanent log listener alongside the one each sync
+ * attaches, whichever registered second silently swallowed the other's events.
+ * The log came out empty in tests while being fine on the device.
+ */
+let listeners = [];
+function emit(event) {
+  for (const listener of [...listeners]) listener(event);
+}
 
 function stubLocalStorage() {
   const store = new Map();
@@ -52,9 +63,14 @@ describe("helio sync lifecycle", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
 
+    listeners = [];
     plugin.addListener.mockImplementation(async (_name, callback) => {
-      emit = callback;
-      return { remove: async () => {} };
+      listeners.push(callback);
+      return {
+        remove: async () => {
+          listeners = listeners.filter((l) => l !== callback);
+        },
+      };
     });
     plugin.connect.mockResolvedValue(undefined);
     plugin.disconnect.mockResolvedValue(undefined);
@@ -119,6 +135,98 @@ describe("helio sync lifecycle", () => {
     expect(seen[0]).toMatch(/WAKING/);
     expect(seen[1]).toMatch(/SAMPLES · 1/);
     expect(store.syncPhase).toBeNull();
+  });
+
+  it("stays busy through the save, not just through the fetch", async () => {
+    // `syncing` used to drop the moment the link closed, while committing sleep
+    // and ingesting tens of thousands of samples was still to come - which is
+    // the part that actually blocks the thread. Every screen keying on it went
+    // quiet at exactly the moment the app stopped responding: Home's sync line
+    // vanished and the pairing form came back over a connect still running.
+    const store = useHelioStore();
+    store.setAuthKey(AUTH_KEY);
+    let duringSave = null;
+    const ingest = await import("@/utils/sampleIngest");
+    vi.spyOn(ingest, "ingestSamples").mockImplementation(async () => {
+      duringSave = { syncing: store.syncing, phase: store.syncPhase };
+      return new Set();
+    });
+    plugin.connect.mockImplementation(async () => {
+      emit({ event: "samples", samples: [{ metric: "hr", t: 1, v: 60 }] });
+      emit({ event: "fetchComplete" });
+    });
+
+    await store.sync(1);
+
+    expect(duringSave.syncing).toBe(true);
+    expect(duringSave.phase).toMatch(/SAVING/);
+    // And it does let go at the end, which is the failure the rest of this file
+    // is about.
+    expect(store.syncing).toBe(false);
+    expect(store.syncPhase).toBeNull();
+  });
+
+  it("refuses to call a connect successful when the sync never ran", async () => {
+    // `sync` resolves null rather than throwing when the link is busy or a sync
+    // is already running. `connect` fell straight through to success on it, and
+    // `{ ok: true, ...null }` is `{ ok: true }`, so the panel read `res.days`
+    // off nothing, flashed "CONNECTED. UNDEFINED DAYS IMPORTED", and marked the
+    // strap connected on the strength of a connect that never happened.
+    const store = useHelioStore();
+    store.setAuthKey(AUTH_KEY);
+    plugin.connect.mockImplementation(async () => {
+      const busy = new Error("the strap link is already in use");
+      busy.code = "LINK_BUSY";
+      throw busy;
+    });
+
+    await expect(store.connect()).rejects.toThrow(/busy/i);
+    expect(store.connected).toBe(false);
+  });
+
+  describe("the diagnostic report", () => {
+    // The panel tells people to paste this to a stranger to get a bug fixed, so
+    // the claim printed above the button ("no personal data and not your pairing
+    // key") has to be enforced rather than believed. The key is the one secret in
+    // the app and it is unrecoverable without the vendor's own app.
+    it("never contains the pairing key, in any casing", async () => {
+      const store = useHelioStore();
+      store.setAuthKey(AUTH_KEY);
+      plugin.connect.mockImplementation(async () => {
+        emit({ event: "log", message: "auth: sending public key" });
+        emit({ event: "fetchComplete" });
+      });
+      await store.sync(1);
+
+      const report = store.diagnosticReport();
+      expect(report).not.toContain(AUTH_KEY);
+      expect(report.toLowerCase()).not.toContain(AUTH_KEY.toLowerCase());
+      expect(report.toUpperCase()).not.toContain(AUTH_KEY.toUpperCase());
+    });
+
+    it("carries the version, the error and the exchange", async () => {
+      const store = useHelioStore();
+      store.setAuthKey(AUTH_KEY);
+      plugin.connect.mockImplementation(async () => {
+        emit({ event: "log", message: "connecting…" });
+        emit({ event: "closed", message: "status 133" });
+      });
+      await store.sync(1).catch(() => null);
+
+      const report = store.diagnosticReport();
+      expect(report).toContain("ATLAS test");
+      expect(report).toContain("status 133");
+      expect(report).toContain("connecting…");
+    });
+
+    it("collects the exchange whether or not a panel is open", () => {
+      // The whole reason the buffer moved into the store: it used to be attached
+      // when DevicePanel mounted, inside a branch that only renders once the
+      // strap is connected, so somebody whose first connect was failing could
+      // reach no log at all.
+      const store = useHelioStore();
+      expect(Array.isArray(store.logLines)).toBe(true);
+    });
   });
 
   it("completes normally when the band reports it is done", async () => {
@@ -223,9 +331,14 @@ describe("helio refresh", () => {
     stubLocalStorage();
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    listeners = [];
     plugin.addListener.mockImplementation(async (_name, callback) => {
-      emit = callback;
-      return { remove: async () => {} };
+      listeners.push(callback);
+      return {
+        remove: async () => {
+          listeners = listeners.filter((l) => l !== callback);
+        },
+      };
     });
     plugin.connect.mockImplementation(async () => {
       queueMicrotask(() => emit({ event: "fetchComplete" }));

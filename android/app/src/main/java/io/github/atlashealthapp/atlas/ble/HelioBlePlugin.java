@@ -300,13 +300,17 @@ public class HelioBlePlugin extends Plugin {
      * hand out a link that is on its way down.
      */
     private void closeLink() {
+        closeLink("closed by user");
+    }
+
+    private void closeLink(final String reason) {
         final HelioLink closing;
         synchronized (this) {
             closing = link;
             link = null;
         }
         if (closing != null) {
-            closing.disconnect();
+            closing.disconnect(reason);
         }
     }
 
@@ -320,7 +324,12 @@ public class HelioBlePlugin extends Plugin {
      */
     @Override
     protected void handleOnDestroy() {
-        closeLink();
+        // Reported as its own reason rather than as the shared "closed by user".
+        // Android destroys the Activity on its own whenever it reclaims the app,
+        // which on a first connect is minutes long and happens while somebody is
+        // checking Bluetooth settings or another band app. Telling them they
+        // cancelled it sends them looking for a button they never pressed.
+        closeLink("Atlas was closed by Android while the sync was running");
         super.handleOnDestroy();
     }
 

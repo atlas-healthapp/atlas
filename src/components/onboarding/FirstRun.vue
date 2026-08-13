@@ -11,10 +11,16 @@
            forward again finds what you typed still there. Nothing is committed
            until its own step's button, apart from the strap, which cannot be
            uncommitted and is why BACK does not undo a connect. -->
-      <button v-if="canGoBack" class="frback mono" type="button" @click="back">
+      <button v-if="canGoBack && !helio.busy" class="frback mono" type="button" @click="back">
         ‹ BACK
       </button>
-      <div class="logo">ATLAS</div>
+      <!-- **Hidden while the strap is being paired**, along with the question and
+           the LATER button below. `StrapConnect` shows the wordmark itself once it
+           starts working, so leaving this one up stacked two ATLASes, and a
+           question you can no longer answer is just noise above a progress bar.
+           The condition is `helio.busy` rather than a local copy, so this and the
+           panel cannot disagree by a frame. -->
+      <div v-if="!helio.busy" class="logo">ATLAS</div>
 
       <!-- **First, before the name, and pairing happens here rather than in
            settings.** The strap is what makes the rest of the app say anything:
@@ -26,12 +32,16 @@
            copy - two sets of instructions, two validators and two pairs of
            failure messages would be two things to keep in step. -->
       <template v-if="step === 'strap'">
-        <p class="lead">Do you have an Amazfit Helio Strap?</p>
-        <p class="hint mono">IT NEEDS A PAIRING KEY, ONCE.</p>
+        <p v-if="!helio.busy" class="lead">Do you have an Amazfit Helio Strap?</p>
+        <p v-if="!helio.busy" class="hint mono">IT NEEDS A PAIRING KEY, ONCE.</p>
         <div class="strapbox">
           <StrapConnect @connected="go('name')" />
         </div>
-        <div class="btns">
+        <!-- Gone while it works, not disabled. A first connect runs for minutes
+             and LATER, FROM SETTINGS is an escape hatch from a decision that has
+             already been made; leaving it there invites a tap that would strand a
+             half-finished import behind the next step. -->
+        <div v-if="!helio.busy" class="btns">
           <button class="btn" @click="go('name')">LATER, FROM SETTINGS</button>
         </div>
       </template>

@@ -32,6 +32,24 @@
       <div v-if="playBoot" class="sys mono">{{ bootLine }}</div>
     </div>
 
+    <!-- **The boot waits here for the archive, and this is what it waits on.**
+         The sequence used to run a fixed 2.2 seconds and hand over regardless, so
+         on a launch where the archive was still being read Home arrived with
+         empty rows and filled in a second later. Worse, the clock driving it is
+         requestAnimationFrame, and the ingest it was racing is main-thread work:
+         when that ran, the clock stopped dead mid-sequence and the dials sat
+         half-drawn with the cards never arriving. That is the "it showed the
+         rings, then everything at once" report, and it is a stalled animation
+         frame rather than slow data.
+
+         **A CSS animation, for the same reason.** Anything on rAF or a timer
+         stops in exactly the moment it is needed. This runs on the compositor
+         and keeps moving through a blocked thread, so a stall reads as work in
+         progress instead of as a crash. -->
+    <div v-if="playBoot && holding" class="bootwait">
+      <div class="crawl"></div>
+    </div>
+
     <!-- **User-chosen since 2026-08-12, and the row has stopped being a colour
          legend because of it.** It was Recovery / Sleep / Protein, one per
          family, which made the three rings double as a standing key for what the
@@ -431,7 +449,14 @@ const famInk = familyInkColor;
 const dayWindow = ref([]);
 async function loadWindow() {
   const to = todayKey.value;
-  dayWindow.value = await dailyValuesForRange(addDays(to, -(WINDOW_DAYS - 1)), to);
+  try {
+    dayWindow.value = await dailyValuesForRange(addDays(to, -(WINDOW_DAYS - 1)), to);
+  } finally {
+    // **In a `finally`, and that is load-bearing.** The boot parks until this is
+    // set, so a storage read that throws must still release it or the splash
+    // becomes permanent. (`BOOT_MAX_HOLD` is the second guard, not the first.)
+    dataReady.value = true;
+  }
   // Deliberately not awaited, and deliberately after the short window. The
   // condition half of Recovery needs six months of rollups, which is an order
   // more reads than anything else Home does; blocking the first paint on it
@@ -818,8 +843,38 @@ const CARD_STEP = 150;
 // pre-exist the instrument.
 const NAV_BACK = 1900;
 
+/**
+ * Where the sequence parks while it waits for the archive.
+ *
+ * Deliberately `DIAL_START`: the wordmark has finished typing and the blackout
+ * has lifted, so there is a mark on screen to wait under, and the dials have not
+ * started, so nothing is holding a half-drawn value. Waiting any later means
+ * pausing mid-instrument, which is the exact frame the freeze reports describe.
+ */
+const BOOT_GATE = DIAL_START;
+
+/**
+ * How long it will wait before showing Home anyway.
+ *
+ * A splash that can outlast a broken IndexedDB read is a splash nobody can get
+ * past, and Home is honest with an empty window: the rows say they are
+ * calibrating rather than showing a wrong number. Six seconds is well past a
+ * normal read and well short of feeling stuck.
+ */
+const BOOT_MAX_HOLD = 6000;
+
 const playBoot = ref(true);
 const bootT = ref(0);
+/** True only while parked at the gate, which is what draws the crawl. */
+const holding = ref(false);
+/**
+ * Set by the first `loadWindow()` to resolve. This is the archive read, not the
+ * strap: waiting on a sync would park the splash for the two minutes a first
+ * connect takes, and yesterday's stored data is the right thing to open with.
+ */
+const dataReady = ref(false);
+let heldFor = 0;
+let lastFrame = null;
 let rafId = null;
 
 function easeOutCubic(x) {
@@ -847,6 +902,12 @@ const logoTyping = computed(() => playBoot.value && bootT.value < 900);
 // long enough to read, then clears rather than settling into a permanent
 // caption nobody reads twice.
 const bootLine = computed(() => {
+  // While parked, it says what it is parked on. "It froze and said nothing" was
+  // a fair description of a screen holding still with STRAP CONNECTED under it.
+  if (holding.value) {
+    if (helio.syncing) return helio.syncPhase || "SYNCING";
+    return "READING YOUR ARCHIVE";
+  }
   if (bootT.value < 620) return "";
   if (bootT.value > 1700) return "";
   return helio.connected ? "STRAP CONNECTED" : "STRAP NOT CONNECTED";
@@ -880,6 +941,7 @@ function skipBoot() {
   if (!playBoot.value) return;
   bootT.value = BOOT_END;
   playBoot.value = false;
+  holding.value = false;
   ui.bootActive = false;
   if (rafId) cancelAnimationFrame(rafId);
   rafId = null;
@@ -895,9 +957,24 @@ onMounted(() => {
     skipBoot();
     return;
   }
-  const t0 = performance.now();
+  // Advanced by the frame delta rather than from a start time, so parking at the
+  // gate is a matter of not adding the delta. Measuring from `t0` would make the
+  // sequence jump forward by however long it waited the moment it resumed.
   function frame(now) {
-    bootT.value = now - t0;
+    const dt = lastFrame == null ? 0 : now - lastFrame;
+    lastFrame = now;
+
+    const gateOpen = dataReady.value || heldFor >= BOOT_MAX_HOLD;
+    if (!gateOpen && bootT.value + dt >= BOOT_GATE) {
+      bootT.value = BOOT_GATE;
+      heldFor += dt;
+      holding.value = true;
+      rafId = requestAnimationFrame(frame);
+      return;
+    }
+    holding.value = false;
+
+    bootT.value += dt;
     if (bootT.value >= NAV_BACK) ui.bootActive = false;
     if (bootT.value < BOOT_END) {
       rafId = requestAnimationFrame(frame);
@@ -976,6 +1053,46 @@ onUnmounted(() => rafId && cancelAnimationFrame(rafId));
   gap: 10px;
   margin-top: 5px;
   min-height: 14px;
+}
+
+/* The wait, drawn under the wordmark while the boot is parked at the gate.
+   Sits above the blackout's z-index so it is visible through the tail of the
+   fade, and takes the accent so it is plainly part of the mark rather than a
+   generic spinner. */
+.bootwait {
+  position: relative;
+  z-index: 901;
+  height: 2px;
+  margin-top: 16px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--dim) 30%, transparent);
+}
+.bootwait .crawl {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 38%;
+  height: 100%;
+  background: var(--acc);
+  animation: bootcrawl 1.5s ease-in-out infinite;
+}
+/* CSS, not requestAnimationFrame. The whole reason this element exists is that
+   the rAF clock driving the boot stops when the main thread is busy, which is
+   precisely when something has to keep moving. A compositor animation does. */
+@keyframes bootcrawl {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(363%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bootwait .crawl {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
 }
 .sys {
   font-size: var(--fs-label);

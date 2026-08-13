@@ -76,28 +76,37 @@
       </div>
       <div v-if="helio.syncing" class="dim-text mono note">{{ phaseLabel }}</div>
 
-      <!-- Only offered once something has gone wrong. A permanent wall of hex
-           frames makes a working app look broken, but the moment a sync fails
-           it is the only thing worth having. -->
-      <div v-if="failing || showLog" class="btnrow">
-        <button class="databtn mono quiet" @click="showLog = !showLog">
-          {{ showLog ? "HIDE LOG" : "SHOW LOG" }}
-        </button>
-      </div>
-
-      <div v-if="showLog" ref="logEl" class="log mono">
-        <div
-          v-for="(line, i) in lines"
-          :key="i"
-          :class="{ err: line.startsWith('!') }"
-        >
-          {{ line }}
-        </div>
-        <div v-if="!lines.length" class="dim-text">
-          NOTHING YET. RUN A SYNC TO SEE THE EXCHANGE.
-        </div>
-      </div>
     </template>
+
+    <!-- **Outside both branches, so it exists before you have ever connected.**
+         This sat inside the `v-else` above, which renders only once `connected`
+         is true: the one person who most needs a log, somebody whose first
+         connect keeps failing, was the one person structurally unable to open
+         one. It is still folded away by default - a permanent wall of hex frames
+         makes a working app look broken - but the row that opens it is always
+         reachable, and COPY DETAILS is what turns "it says it could not connect"
+         into a report that can be acted on. -->
+    <div class="btnrow">
+      <button class="databtn mono quiet" @click="showLog = !showLog">
+        {{ showLog ? "HIDE LOG" : "SHOW LOG" }}
+      </button>
+      <button class="databtn mono quiet" @click="copyDetails">
+        {{ copied ? "COPIED" : "COPY DETAILS" }}
+      </button>
+    </div>
+
+    <div v-if="showLog" ref="logEl" class="log mono">
+      <div
+        v-for="(line, i) in helio.logLines"
+        :key="i"
+        :class="{ err: line.includes('!') }"
+      >
+        {{ line }}
+      </div>
+      <div v-if="!helio.logLines.length" class="dim-text">
+        NOTHING YET. RUN A SYNC TO SEE THE EXCHANGE.
+      </div>
+    </div>
 
     <Transition name="toast">
       <div v-if="message" class="msg mono">{{ message }}</div>
@@ -106,8 +115,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { registerPlugin } from "@capacitor/core";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useHelioStore } from "@/stores/helio";
 import { getSamples } from "@/utils/sampleDb";
 import { batteryLife, drainPerSync, formatDays, lifeBand } from "@/utils/strapHealth";
@@ -120,8 +128,6 @@ import StrapConnect from "./StrapConnect.vue";
 // is opened, so the script needs to read `open` and not only the template.
 const props = defineProps({ open: { type: Boolean, default: false } });
 defineEmits(["toggle"]);
-
-const HelioBle = registerPlugin("HelioBle");
 
 const helio = useHelioStore();
 
@@ -154,11 +160,22 @@ const keyProblem = computed(() => {
   return `THAT IS ${k.length} CHARACTERS. IT SHOULD BE 32.`;
 });
 const showLog = ref(false);
-const lines = ref([]);
 const message = ref("");
 const logEl = ref(null);
+const copied = ref(false);
 
-let handle = null;
+async function copyDetails() {
+  try {
+    await navigator.clipboard.writeText(helio.diagnosticReport());
+    copied.value = true;
+    setTimeout(() => (copied.value = false), 3000);
+  } catch {
+    // Same fallback as StrapConnect: open the log so it can be selected by hand
+    // rather than leaving a button that silently did nothing.
+    showLog.value = true;
+    flash("COULD NOT COPY. SELECT THE LOG BELOW INSTEAD.");
+  }
+}
 
 const failing = computed(() => Boolean(helio.lastSyncError));
 
@@ -324,22 +341,22 @@ watch(
 onMounted(async () => {
   await helio.hydrate();
   keyDraft.value = helio.authKey;
+});
 
-  handle = await HelioBle.addListener("bleLog", ({ message: line }) => {
-    if (!line) return;
-    lines.value.push(line);
-    // Bounded: a multi-day fetch emits hundreds of lines and the oldest are
-    // never the interesting ones.
-    if (lines.value.length > 300) lines.value.splice(0, lines.value.length - 300);
+// **The log is the store's now, not this panel's.** It was collected here, into
+// a buffer that started empty when the section was opened and lived inside the
+// branch that only renders once `connected` is true - so it never held the
+// attempt you opened it to look at, and somebody whose first connect was failing
+// could not reach it at all. One buffer, always collecting, both panels read it.
+watch(
+  () => helio.logLines.length,
+  () => {
+    if (!showLog.value) return;
     nextTick(() => {
       if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight;
     });
-  });
-});
-
-onUnmounted(() => {
-  if (handle) handle.remove();
-});
+  }
+);
 
 function flash(text) {
   message.value = text;
@@ -511,6 +528,9 @@ async function doDisconnect() {
   line-height: 1.5;
   white-space: pre;
   color: var(--body);
+  /* Selectable, because COPY DETAILS can be refused by the WebView and hand
+     selection is then the only way the log leaves the phone. */
+  user-select: text;
 }
 .log .err {
   color: var(--bad);
