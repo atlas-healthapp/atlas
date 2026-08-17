@@ -33,30 +33,72 @@ export function useAutoSync() {
 
   let timer = null;
   let resumeHandle = null;
+  let onVisible = null;
 
-  function refresh() {
+  /**
+   * @param trigger which of the three fired, recorded whatever happens next.
+   *
+   * **The trigger is logged before the visibility gate, not after.** On
+   * 2026-08-14 the app was resumed after a night and did not fetch, and neither
+   * `connected` nor the rate limit explained it - which left "the event never
+   * fired" and "the event fired and something declined it" indistinguishable,
+   * because nothing recorded either. Those are opposite fixes: one needs a
+   * different trigger, the other needs a different rule.
+   *
+   * The gate itself is a real suspect. Android can deliver Capacitor's resume
+   * before the WebView flips `visibilityState` to visible, and this returns on
+   * that without a word.
+   */
+  function refresh(trigger) {
     // Nothing to talk to in a browser: the store drives a native plugin, and
     // attempting it on the dev server only manufactures a sync error that then
     // shows on Home as though the strap had failed.
     if (!Capacitor.isNativePlatform()) return;
-    if (document.visibilityState !== "visible") return;
-    helio.refresh().catch(() => null);
+    if (document.visibilityState !== "visible") {
+      helio.noteRefresh(trigger, `skipped: document ${document.visibilityState}`);
+      return;
+    }
+    helio.refresh({ trigger }).catch(() => null);
+  }
+
+  /**
+   * Re-read the permissions the app can only be told about by the OS.
+   *
+   * **Deliberately not inside `refresh`.** That is gated on `visibilityState` and
+   * rate limited to five minutes, and neither applies here: this costs one call
+   * across the bridge, spends nothing on the strap, and the one moment it most
+   * needs to run is the resume that arrives *before* the WebView is marked
+   * visible, having just come back from the system settings screen where the user
+   * granted the thing. Skipping it there would leave the panel warning about a
+   * permission that had been granted seconds earlier.
+   */
+  function recheckPermissions() {
+    if (!Capacitor.isNativePlatform()) return;
+    helio.checkExactAlarm();
   }
 
   onMounted(async () => {
-    timer = setInterval(refresh, TICK_MS);
+    timer = setInterval(() => refresh("tick"), TICK_MS);
+    recheckPermissions();
     // Coming back to a tab is the browser's version of resume, and it is what
     // the dev server exercises. On the phone both fire, and the rate limit in
     // the store is what stops that being two syncs.
-    document.addEventListener("visibilitychange", refresh);
+    onVisible = () => {
+      refresh("visible");
+      recheckPermissions();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     if (Capacitor.isNativePlatform()) {
-      resumeHandle = await CapApp.addListener("resume", refresh);
+      resumeHandle = await CapApp.addListener("resume", () => {
+        refresh("resume");
+        recheckPermissions();
+      });
     }
   });
 
   onUnmounted(() => {
     if (timer) clearInterval(timer);
-    document.removeEventListener("visibilitychange", refresh);
+    if (onVisible) document.removeEventListener("visibilitychange", onVisible);
     resumeHandle?.remove();
   });
 }

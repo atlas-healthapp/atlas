@@ -126,10 +126,52 @@ export async function commitWorkouts(workouts) {
  */
 const NIGHT_FLOOR_MINUTES = 90;
 
+/**
+ * The window a sleep has to sit entirely inside before it is called a nap.
+ *
+ * **Why this exists.** Naps were never excluded on purpose: they fell out of the
+ * floor above and of longest-wins per wake date, and neither knows what a nap is.
+ * A nap therefore loses to the night that ended the same morning, which is the
+ * common case and reads as working. On a day the band recorded no night at all
+ * it does not lose to anything, and a two-hour afternoon sleep was committed as
+ * that date's *night*, carrying its hours, its stages and its score into the
+ * sleep score, regularity and Recovery.
+ *
+ * **Deliberately the narrowest rule that can catch it.** A sleep counts as
+ * daytime only if it begins at or after 09:00, ends by 19:00, and starts and
+ * ends on the same calendar day. A real night fails all three: it spans
+ * midnight. Even somebody who goes to bed at 03:00 and sleeps until 11:30 is
+ * untouched, because the rule is about where the whole session sits and not
+ * about how late the wake is.
+ *
+ * **Known cost, stated rather than discovered later**: a night-shift sleep from
+ * 09:00 to 16:00 is genuinely a night and this calls it a nap. Atlas has no way
+ * to tell those apart today and the cost of being wrong falls the safer way -
+ * a missing figure rather than a wrong one. It goes away once naps are stored
+ * as naps; see the ticket in docs/backlog.md.
+ */
+const NAP_EARLIEST_HOUR = 9;
+const NAP_LATEST_HOUR = 19;
+
+/** Is this sleep wholly inside one daytime, ie a nap rather than a night? */
+export function isDaytimeSleep(session) {
+  const bed = session?.bedTime;
+  const wake = session?.wakeTime;
+  if (!(bed instanceof Date) || !(wake instanceof Date)) return false;
+  if (bed.toLocaleDateString("sv") !== wake.toLocaleDateString("sv")) return false;
+  return bed.getHours() >= NAP_EARLIEST_HOUR && wake.getHours() < NAP_LATEST_HOUR;
+}
+
 export function commitSleepSessions(sessions, checkin) {
   const byDate = new Map();
   for (const session of sessions) {
     if (!session) continue;
+    // Dropped here rather than at the guards below, so a nap never competes for
+    // the date at all. Filtering later would still let a three-hour afternoon
+    // sleep out-rank a genuinely bad two-hour night, since the winner is picked
+    // by length. **A nap is not stored anywhere yet** - see the ticket - and
+    // that is a smaller loss than it being stored as the night.
+    if (isDaytimeSleep(session)) continue;
     const dateKey = session.wakeTime.toLocaleDateString("sv");
     const bedKey = session.bedTime.getTime();
     const forDate = byDate.get(dateKey) ?? new Map();

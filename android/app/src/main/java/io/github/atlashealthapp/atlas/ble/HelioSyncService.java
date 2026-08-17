@@ -306,10 +306,20 @@ public class HelioSyncService extends Service {
         // and 10 minute checks that left exactly one usable check a night, and
         // an inexact alarm carrying a 22 minute window can miss even that.
         final long untilWindow = SmartAlarm.millisUntilWindow(prefs(), now);
+        // "This booking is the one that lands on the window", which means its
+        // delay reaches the window rather than falling short of it. The test was
+        // written the other way round (delayMs <= untilWindow) and that is true
+        // of every ordinary tick while the window is still hours away: measured
+        // on the trail, a tick at 00:02 for an 08:45 alarm was booked with
+        // setAlarmClock and logged WINDOW-exact. Harmless to the alarm, because
+        // interval() had already shortened the delay correctly, but it spent an
+        // alarm-clock slot every half hour all night and it made the trail
+        // useless for the one question it exists to answer - which booking was
+        // the window one.
         final boolean forWindow =
                 SmartAlarm.watching(prefs())
                         && (SmartAlarm.insideWindow(prefs(), now)
-                                || (untilWindow > 0 && delayMs <= untilWindow + 10_000L));
+                                || (untilWindow > 0 && delayMs + 10_000L >= untilWindow));
         boolean exact = false;
         try {
             if (forWindow) {
@@ -341,7 +351,23 @@ public class HelioSyncService extends Service {
      * available before the night rather than after it.
      */
     boolean canBeExact() {
-        final AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        return canBeExact(this);
+    }
+
+    /**
+     * The same question from outside the service, for the settings panel.
+     *
+     * <p>Static and context-taking so there is <b>one</b> definition of "is this
+     * allowed": the panel asking the AlarmManager itself, rather than reading
+     * {@link #KEY_EXACT_REFUSED}, is deliberate. That pref is the service's record
+     * of what happened on a night, written when a booking was actually refused,
+     * and it stays true until the next booking - so a permission granted this
+     * morning would still read as refused until tonight. The live answer is the
+     * one a screen offering to fix it needs.
+     */
+    static boolean canBeExact(final android.content.Context ctx) {
+        final AlarmManager am =
+                (AlarmManager) ctx.getSystemService(android.content.Context.ALARM_SERVICE);
         if (am == null) return false;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
         return am.canScheduleExactAlarms();
@@ -419,6 +445,32 @@ public class HelioSyncService extends Service {
      * <p>Once a night, guarded by a day key, because a second write after the
      * first has already buzzed would be a second alarm.
      */
+    /**
+     * Send an alarm, over the link this sync is holding if there is one.
+     *
+     * <p><b>Every alarm write from this service goes through here.</b> All three
+     * of them - the early wake, the onset retime and the re-arm - are called
+     * from {@code finish()}, which runs while the sync's own GATT is still open,
+     * and {@code connectForAlarm} refuses outright when a link is up. So each of
+     * them silently sent nothing, and {@code finish()} then disconnected and
+     * discarded the payload. Nothing on the phone said so, because the trail
+     * line is written before the write.
+     *
+     * @return true when a write was actually issued, so the caller can hold the
+     *     link open for the acknowledgement instead of tearing it down.
+     */
+    private boolean sendAlarm(final byte[] payload, final String what) {
+        if (link == null) {
+            trail(System.currentTimeMillis(), what + " FAILED: no link");
+            return false;
+        }
+        if (link.writeAlarmNow(payload)) return true;
+        // No open link to ride on, so open one. This is the app's path and it is
+        // the right one here too when a sync has already closed.
+        link.connectForAlarm(payload);
+        return true;
+    }
+
     private void maybeWakeEarly() {
         final long now = System.currentTimeMillis();
         // Recorded before the decision, and only inside the window, so the
@@ -426,8 +478,18 @@ public class HelioSyncService extends Service {
         // band had nothing to say" from "it woke up and you were in deep".
         // Those are three different faults and last_sync alone names none.
         if (SmartAlarm.insideWindow(prefs(), now)) {
+            // Every reason this tick might not wake you, named. `stage` is the
+            // decision and answers -1 for three different causes, so `stale` and
+            // `sessions` are recorded beside it: 0 sessions is a band that
+            // handed over nothing, a large `stale` is a sync that was not fresh
+            // enough, and `stale=-1` with sessions present is blobs that could
+            // not be read. `fired` catches the fourth case, a window that was
+            // already spent earlier the same morning.
             trail(now, "in-window stage=" + SmartAlarm.currentStage(sleepSessions, now)
-                    + " sessions=" + sleepSessions.size());
+                    + " sessions=" + sleepSessions.size()
+                    + " stale=" + SmartAlarm.readingAgeMinutes(sleepSessions, now)
+                    + " fired=" + (SmartAlarm.dayKey(now)
+                            .equals(prefs().getString(SmartAlarm.KEY_FIRED_ON, null)) ? 1 : 0));
         }
         if (!SmartAlarm.shouldWakeNow(prefs(), sleepSessions, now)) return;
 
@@ -447,8 +509,14 @@ public class HelioSyncService extends Service {
             // succeeds must not leave the window armed for another attempt ten
             // minutes later, which would be a second buzz.
             SmartAlarm.markFired(prefs(), now);
+            // The slot now owes the user their own alarm back: what is about to
+            // be written is a one-off, and once it has gone off the band holds
+            // nothing. Recorded next to the mark that stops a second buzz, and
+            // for the same reason - before the write rather than after, so a
+            // write that half succeeds still leaves the debt recorded.
+            SmartAlarm.markRearmOwed(prefs(), at.getTimeInMillis());
             trail(now, "FIRING at " + stamp(at.getTimeInMillis()));
-            if (link != null) link.connectForAlarm(payload);
+            alarmWriteInFlight = sendAlarm(payload, "FIRE");
         } catch (final Exception e) {
             // Nothing to recover: the strap keeps the time already on it.
             trail(now, "FIRE FAILED " + e);
@@ -481,9 +549,134 @@ public class HelioSyncService extends Service {
                             false,
                             HelioAlarm.REPEAT_ONCE);
             SmartAlarm.markRetimed(prefs(), now);
-            if (link != null) link.connectForAlarm(payload);
+            // Owed back from when this one goes off, which may be hours away.
+            SmartAlarm.markRearmOwed(prefs(), target);
+            trail(now, "RETIME to " + stamp(target));
+            alarmWriteInFlight = sendAlarm(payload, "RETIME");
         } catch (final Exception e) {
             // The cap the user set is still on the strap. Nothing to recover.
+        }
+    }
+
+    /**
+     * Put the user's own alarm back after a one-off has spent the slot.
+     *
+     * <p>Both early wakes and onset retimes work by overwriting the single slot
+     * the app wrote with a {@code REPEAT_ONCE} alarm. That is what makes them
+     * safe to fail, and it is also why the recurring alarm has to be written
+     * again afterwards: once the one-off has gone off, the band is holding
+     * nothing at all. Before 2026-08-14 nothing did, so the first smart wake
+     * disarmed every night after it and the only cure was opening Settings and
+     * pressing SEND.
+     *
+     * <p>Costs one BLE connect, on a tick well after the buzz. <b>The debt is
+     * only cleared once the band has acknowledged the write</b>, which is what
+     * {@code onAlarmSet} is for: a connect that fails because the strap is out of
+     * range in the morning would otherwise leave the alarm unset for the
+     * following night, which is precisely the failure this exists to stop. Each
+     * attempt pushes the next one out by {@link #REARM_RETRY_MINUTES} so a strap
+     * that is simply away is not hammered.
+     */
+    private void maybeRearm() {
+        final long now = System.currentTimeMillis();
+        if (!SmartAlarm.rearmDue(prefs(), now)) {
+            // An alarm switched off between the buzz and now is not owed one.
+            // Clearing here rather than leaving it means turning the alarm back
+            // on months later cannot trigger a write nobody asked for.
+            if (prefs().getLong(SmartAlarm.KEY_REARM_AFTER, 0L) > 0
+                    && !prefs().getBoolean(SmartAlarm.KEY_ENABLED, false)) {
+                SmartAlarm.clearRearm(prefs());
+            }
+            return;
+        }
+
+        final int hour = SmartAlarm.hardHour(prefs());
+        if (hour < 0) {
+            SmartAlarm.clearRearm(prefs());
+            return;
+        }
+
+        try {
+            final byte[] payload =
+                    HelioAlarm.create(
+                            0,
+                            hour,
+                            SmartAlarm.hardMinute(prefs()),
+                            true,
+                            false,
+                            SmartAlarm.repeatMask(prefs().getString(SmartAlarm.KEY_DAYS, "")));
+            // Not cleared here, unlike the fire mark above, and the asymmetry is
+            // deliberate. A repeated fire is a second buzz in one morning, so
+            // that one is marked before the write and never retried. A repeated
+            // re-arm writes the same alarm twice, which costs a connect and
+            // changes nothing, so this one is allowed to retry until the band
+            // says yes. Backed off first so a failure cannot spin.
+            SmartAlarm.markRearmAt(prefs(), now + REARM_RETRY_MINUTES * 60_000L);
+            rearmInFlight = true;
+            trail(now, "REARM to " + hour + ":" + SmartAlarm.hardMinute(prefs()));
+            alarmWriteInFlight = sendAlarm(payload, "REARM");
+        } catch (final Exception e) {
+            rearmInFlight = false;
+            trail(now, "REARM FAILED " + e);
+        }
+    }
+
+    /** How long before a re-armed alarm the band never acknowledged is retried. */
+    private static final int REARM_RETRY_MINUTES = 30;
+
+    /**
+     * True between asking for a re-arm and hearing back about it.
+     *
+     * <p>Needed because an early wake produces an alarm acknowledgement too, and
+     * that one must not be taken as proof the user's own alarm went back on.
+     */
+    private boolean rearmInFlight;
+
+    /**
+     * True between issuing any alarm write and the band answering it.
+     *
+     * <p>{@code finish()} closes the link on its last line, two lines after the
+     * alarm hooks run. Closing it there cut the write off, and before
+     * 2026-08-14 it discarded every alarm this service ever tried to set.
+     */
+    private boolean alarmWriteInFlight;
+
+    /**
+     * Close the link once an alarm write has been answered, or given up on.
+     *
+     * <p>The band answers an alarm write in well under a second when it answers
+     * at all. Ten seconds is generous, and the point of the backstop is that a
+     * band which never replies must not leave the link held open until the next
+     * tick - the strap takes one central at a time, so a link nobody closes is a
+     * sync that cannot run.
+     */
+    private static final long ALARM_ACK_TIMEOUT_MS = 10_000L;
+
+    private void scheduleAlarmWriteTimeout() {
+        new android.os.Handler(android.os.Looper.getMainLooper())
+                .postDelayed(
+                        () -> {
+                            if (!alarmWriteInFlight) return;
+                            trail(System.currentTimeMillis(), "ALARM no answer, closing");
+                            closeAfterAlarm();
+                        },
+                        ALARM_ACK_TIMEOUT_MS);
+    }
+
+    /**
+     * A Handler is correct here and nowhere else in this file.
+     *
+     * <p>Everything that has to survive deep sleep is booked with AlarmManager,
+     * because postDelayed counts in uptimeMillis and stops with the CPU. This
+     * one is a ten-second wait on a link that is already open and keeping the
+     * radio awake, so there is nothing for it to sleep through.
+     */
+    private void closeAfterAlarm() {
+        alarmWriteInFlight = false;
+        rearmInFlight = false;
+        if (link != null) {
+            link.disconnect();
+            link = null;
         }
     }
 
@@ -555,6 +748,37 @@ public class HelioSyncService extends Service {
 
             @Override
             public void onReady() {
+            }
+
+            /**
+             * The band's answer to an alarm write.
+             *
+             * <p>Only interesting for a re-arm, and only when accepted. An early
+             * wake produces one of these too, and taking that as proof the user's
+             * own alarm went back on would clear a debt nothing had paid.
+             */
+            /**
+             * The band's answer to an alarm write.
+             *
+             * <p><b>Trailed for every write, not only for re-arms.</b> The trail
+             * recorded FIRING before the write and nothing after it, so three
+             * weeks of mornings looked like the decision had worked when no
+             * alarm had left the phone at all. A decision without its outcome is
+             * what made this take three attempts to find.
+             */
+            @Override
+            public void onAlarmSet(final boolean accepted, final int status) {
+                final long now = System.currentTimeMillis();
+                trail(now, "ALARM " + (accepted ? "accepted" : "refused status " + status));
+                if (rearmInFlight && accepted) {
+                    // Only a re-arm clears the debt, and only when accepted. An
+                    // early wake produces one of these too, and taking that as
+                    // proof the user's own alarm went back on would clear a debt
+                    // nothing had paid. A refusal is left owed: the backoff has
+                    // already booked the retry.
+                    SmartAlarm.clearRearm(prefs());
+                }
+                closeAfterAlarm();
             }
 
             @Override
@@ -636,6 +860,10 @@ public class HelioSyncService extends Service {
         // lose the observation along with the data.
         maybeRetimeOnset();
         maybeWakeEarly();
+        // After both, never before: each of them can take the slot on this very
+        // tick, and re-arming first would put the recurring alarm back and then
+        // immediately overwrite it again.
+        maybeRearm();
 
         if (SleepProbe.enabled(prefs())) {
             SleepProbe.record(this, System.currentTimeMillis(), sleepSessions);
@@ -656,7 +884,15 @@ public class HelioSyncService extends Service {
         samples.clear();
         sleepSessions.clear();
         workouts.clear();
-        if (link != null) {
+        // **Held open when an alarm is still being written.** This close used to
+        // run unconditionally, two lines after the alarm hooks, and it is what
+        // discarded every alarm this service ever tried to set: the write had
+        // already been refused for want of a free link, and the payload went out
+        // with the link. onAlarmSet closes it now, and closeAfterAlarm is booked
+        // as the backstop for a band that never answers.
+        if (alarmWriteInFlight) {
+            scheduleAlarmWriteTimeout();
+        } else if (link != null) {
             link.disconnect();
             link = null;
         }

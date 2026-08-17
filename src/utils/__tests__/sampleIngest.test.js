@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { commitSleepSessions } from "@/utils/sampleIngest";
+import { commitSleepSessions, isDaytimeSleep } from "@/utils/sampleIngest";
 import { today } from "@/utils/date";
 
 // Minimal stand-in for the checkin store: commitSleepSessions only needs
@@ -188,6 +188,80 @@ describe("commitSleepSessions partial nights", () => {
     commitSleepSessions([fragment, session()], checkin);
 
     expect(checkin.entryFor("2026-07-28").sleep).toBeCloseTo(410 / 60, 5);
+  });
+});
+
+describe("naps", () => {
+  const nap = (o = {}) =>
+    session({
+      bedTime: new Date("2026-07-28T14:00:00"),
+      wakeTime: new Date("2026-07-28T16:10:00"),
+      totalSleepMinutes: 125,
+      score: 70,
+      ...o,
+    });
+
+  it("never stores an afternoon sleep as that day's night", () => {
+    // The bug: the 90-minute floor cannot catch a two-hour nap, and on a day the
+    // band recorded no night there is nothing for it to lose to, so it was
+    // committed as the night with its hours, stages and score.
+    const checkin = fakeCheckin();
+    commitSleepSessions([nap()], checkin);
+    expect(checkin.entryFor("2026-07-28")).toBeNull();
+  });
+
+  it("does not let a long nap out-rank a genuinely bad night", () => {
+    // Longest-wins picks the winner, so a three-hour nap beat a two-hour night
+    // before naps were dropped ahead of the comparison rather than after it.
+    const checkin = fakeCheckin();
+    const badNight = session({
+      bedTime: new Date("2026-07-28T02:40:00"),
+      wakeTime: new Date("2026-07-28T04:55:00"),
+      totalSleepMinutes: 130,
+    });
+
+    commitSleepSessions([nap({ totalSleepMinutes: 190 }), badNight], checkin);
+
+    expect(checkin.entryFor("2026-07-28").sleep).toBeCloseTo(130 / 60, 5);
+  });
+
+  it("leaves a real night alone however late it ends", () => {
+    // The rule is about where the whole sleep sits, not how late the wake is.
+    // Somebody going to bed at 03:00 and sleeping until 11:30 is a night: it
+    // spans midnight, so it can never be inside one daytime.
+    const checkin = fakeCheckin();
+    commitSleepSessions(
+      [
+        session({
+          bedTime: new Date("2026-07-27T23:40:00"),
+          wakeTime: new Date("2026-07-28T11:30:00"),
+          totalSleepMinutes: 600,
+        }),
+      ],
+      checkin
+    );
+    expect(checkin.entryFor("2026-07-28").sleep).toBeCloseTo(10, 5);
+  });
+
+  it("draws the line at the hours, not at the duration", () => {
+    expect(isDaytimeSleep(nap())).toBe(true);
+    // Starts before 09:00, so it is the tail of a night rather than a nap.
+    expect(
+      isDaytimeSleep({
+        bedTime: new Date("2026-07-28T08:30:00"),
+        wakeTime: new Date("2026-07-28T10:00:00"),
+      })
+    ).toBe(false);
+    // Runs past 19:00, which is an early bedtime rather than a nap.
+    expect(
+      isDaytimeSleep({
+        bedTime: new Date("2026-07-28T18:00:00"),
+        wakeTime: new Date("2026-07-28T20:30:00"),
+      })
+    ).toBe(false);
+    // Anything that is not a pair of Dates is not something to judge.
+    expect(isDaytimeSleep(null)).toBe(false);
+    expect(isDaytimeSleep({ bedTime: 1, wakeTime: 2 })).toBe(false);
   });
 });
 

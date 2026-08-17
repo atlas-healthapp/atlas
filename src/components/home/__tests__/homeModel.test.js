@@ -105,6 +105,58 @@ describe("recoveryFor", () => {
     expect(result.score).toBeGreaterThan(0);
   });
 
+  it("shows the night before when today has begun but not been slept through", () => {
+    // Just after midnight the date rolls over and carries a waking resting heart
+    // rate and nothing else. Scored, that returned a real-looking number about a
+    // night nobody had had. The fallback is one day only and it says which day
+    // it is describing, or it would be lying about the date rather than the
+    // score.
+    const yesterday = "2026-07-27";
+    const result = recoveryFor({
+      // Ten, not eight: scoring yesterday needs seven nights BEFORE yesterday,
+      // which is what a real thirty-day window always has and a tight fixture
+      // does not.
+      dayWindow: window({ nights: 10, todayOverrides: { hrv: null, restingHr: 67 } }),
+      entry: null,
+      entries: [{ date: yesterday, sleep: 7.5 }],
+      todayKey: TODAY,
+      sleepGoalHours: 8,
+    });
+
+    expect(result.state).toBe("ready");
+    expect(result.forDate).toBe(yesterday);
+    expect(result.fromPreviousNight).toBe(true);
+  });
+
+  it("does not step back to a day that cannot be scored either", () => {
+    // Two days without a night is a strap in a drawer, not a night still to
+    // come, and a score from the day before yesterday would be stale enough to
+    // mislead. The honest answer is the one today already gave.
+    const result = recoveryFor({
+      dayWindow: window({ nights: 8, todayOverrides: { hrv: null, restingHr: 67 } }),
+      entry: null,
+      entries: [],
+      todayKey: TODAY,
+      sleepGoalHours: 8,
+    });
+
+    expect(result.state).toBe("awaiting-night");
+    expect(result.forDate).toBe(TODAY);
+  });
+
+  it("names the date it scored even on an ordinary day", () => {
+    // Every screen reads `forDate` rather than assuming today, so the fallback
+    // cannot be the only path that carries one.
+    const result = recoveryFor({
+      dayWindow: window({ nights: 8 }),
+      entry: { sleep: 8 },
+      todayKey: TODAY,
+      sleepGoalHours: 8,
+    });
+    expect(result.forDate).toBe(TODAY);
+    expect(result.fromPreviousNight).toBeUndefined();
+  });
+
   it("takes sleep from the checkin entry, not from the sample rollups", () => {
     const short = recoveryFor({
       dayWindow: window({ nights: 8 }),

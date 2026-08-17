@@ -20,9 +20,15 @@ import { resolve } from "path";
  * did not have. The strap diagnostic's COPY DETAILS reported that same string,
  * so a bug report would have named the wrong build.
  *
- * A non-release build therefore appends the commit it was built from, and marks
- * a dirty tree, giving `1.0.5+a1b2c3d-dev` or `1.0.5+a1b2c3d-dirty`. Release
- * builds are unchanged: `npm run release` sets ATLAS_RELEASE and gets `1.0.5`.
+ * A non-release build therefore appends the commit it was built from, giving
+ * `1.0.5+a1b2c3d-dev`. Release builds are unchanged: `npm run release` sets
+ * ATLAS_RELEASE and gets `1.0.5`.
+ *
+ * **A dirty tree gets no commit at all**, only `1.0.5+dev`. The sha is a promise
+ * that the build is that commit, and a build carrying uncommitted edits is not:
+ * naming one would be the same wrong-build bug in a new form, since the commit
+ * could be read back and would not contain what was running. Nothing is lost that
+ * was true - a dirty build is not identifiable, and saying so is the point.
  */
 function appVersion() {
   let name = "dev";
@@ -37,9 +43,10 @@ function appVersion() {
   // Never fatal. A build outside a git checkout still has to produce something,
   // and "unknown" is honest where a bare version number would be a lie.
   try {
-    const sha = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
     const dirty = execSync("git status --porcelain", { encoding: "utf8" }).trim().length > 0;
-    return `${name}+${sha}${dirty ? "-dirty" : "-dev"}`;
+    if (dirty) return `${name}+dev`;
+    const sha = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+    return `${name}+${sha}-dev`;
   } catch {
     return `${name}+unknown-dev`;
   }

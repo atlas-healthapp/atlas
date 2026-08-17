@@ -8,8 +8,10 @@
     "cap:sync": "npm run build && npx cap sync",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:android": "node scripts/test-android.mjs",
     "release": "node scripts/release.mjs",
-    "publish": "node scripts/publish-public.mjs"
+    "publish": "node scripts/publish-public.mjs",
+    "ship": "node scripts/ship.mjs"
   },
   "license": "AGPL-3.0-or-later",
   "type": "module",

@@ -81,7 +81,22 @@ export function currentStage(session, nowMillis) {
   const timeline = session?.stageTimeline;
   if (!timeline?.length || !session?.bedTime) return null;
 
+  // **A bedtime that is neither a Date nor a number must refuse, not compute.**
+  // It used to be taken as-is, and the arithmetic below then ran on a string:
+  // `bedMs + minutes` concatenates, every `>` comparison against a number is
+  // false, and `staleMinutes` comes out NaN - which passes the staleness gate in
+  // smartDecision, because NaN fails every comparison including the one meant to
+  // reject it. So a session with a bedtime in the wrong shape did not fail
+  // safely. It reported whichever stage the loop happened to land on, with the
+  // "READING TOO OLD" guard silently disabled, in the one piece of code that runs
+  // while you are asleep and cannot be watched.
+  //
+  // Both real shapes still work: the decoder hands over a Date, and a night that
+  // has been through storage comes back as epoch ms, because sleepStages is
+  // persisted as JSON. Anything else returns null, which every caller already
+  // treats as "do nothing".
   const bedMs = session.bedTime instanceof Date ? session.bedTime.getTime() : session.bedTime;
+  if (!Number.isFinite(bedMs)) return null;
   const first = timeline[0].startMinute ?? 0;
 
   let best = null;

@@ -259,6 +259,41 @@ export function computeRecovery({
     };
   }
 
+  // **A date whose night has not happened yet cannot be scored, and scoring it
+  // anyway produced a real number that was badly wrong.** Measured on the phone
+  // at 00:32 on 2026-08-14: the date had rolled over half an hour earlier, so it
+  // carried no sleep and no HRV - HRV is only produced while asleep - and both
+  // of those terms were withheld and their weight redistributed onto the one
+  // term that had a value. That value was a resting heart rate of 67, being the
+  // tenth percentile of thirty-two minutes of sitting up awake, against a
+  // baseline near 47. One awake reading carrying the whole score returned 38,
+  // and the app said the user had recovered badly from a night they had not had.
+  //
+  // Withholding both terms is right on a *finished* day where the strap simply
+  // failed to record them: a full day's resting heart rate is still a fair
+  // reading and the redistribution is the honest response. What separates the
+  // two cases is not the missing data, it is whether the night has happened, and
+  // no sleep plus no HRV is the only shape that says it has not.
+  //
+  // The caller shows the last scored day instead, labelled with its date. That
+  // is the user's own expectation ("it shouldn't have changed from yesterday"),
+  // and the alternative blanks the app's headline number every night at midnight.
+  // Narrower than `no-data` below, and the two must not be confused. Nothing at
+  // all recorded is a strap that was not worn, which is true at any hour and
+  // should keep saying so. This is the specific shape of a date that has begun
+  // but not been slept through: daytime readings exist, the night does not.
+  if (today.hrv == null && today.sleep == null && today.restingHr != null) {
+    return {
+      state: "awaiting-night",
+      score: null,
+      label: null,
+      terms: {},
+      // Carried for the same reason `calibrating` carries them: a screen can
+      // still show what was measured rather than claiming there is nothing.
+      readings: { hrv: today.hrv, restingHr: today.restingHr, sleep: today.sleep },
+    };
+  }
+
   const hrvZ = deviation(today.hrv, hrvBaseline, { log: true });
   const rhrZ = deviation(today.restingHr, rhrBaseline);
 
@@ -1048,6 +1083,12 @@ export function recoveryExplanation(result) {
     return `Learning your baseline. ${left} more ${left === 1 ? "night" : "nights"} before Recovery can mean anything.`;
   }
   if (result.state === "no-data") return "No readings from the strap for today yet.";
+  // Only reachable when there is no previous night to fall back to either, since
+  // the caller steps back a day when it can. Says what is missing rather than
+  // what is wrong: nothing is.
+  if (result.state === "awaiting-night") {
+    return "Recovery is scored from your night. Nothing to score until you have slept.";
+  }
 
   const { deviations, terms } = result;
 
@@ -1088,10 +1129,19 @@ export function recoveryExplanation(result) {
   // reads as the two disagreeing rather than as one of them taking a longer
   // view. So when last night is well under the week, the line says exactly
   // that, and the two numbers explain each other.
+  // **Said in words, not as a pair of scores** (user's call, 2026-08-14). It
+  // read "last night scored 58 against 74 for the week", which was the only
+  // numeric clause in an otherwise plain-English sentence, and it never said
+  // what those numbers were about: "last night" alone could be the heart rate
+  // clause continuing. Every other clause here names its subject and describes a
+  // direction, so this one does too.
+  //
+  // The numbers are not lost, they have a better home: the SLEEP dial is
+  // directly above this card and the sleep page itemises the night in full.
   const weekly = terms.sleep != null ? Math.round(terms.sleep * 100) : null;
   const lastNight = result.lastNightScore ?? null;
   if (weekly != null && lastNight != null && weekly - lastNight >= SLEEP_NIGHT_GAP) {
-    off.push(`last night scored ${lastNight} against ${weekly} for the week`);
+    off.push("sleep last night was poor against your average");
   } else if (terms.sleep != null && terms.sleep < 0.7) {
     off.push("sleep has been short");
   }

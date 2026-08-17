@@ -40,6 +40,16 @@ const DELIBERATELY_EXCLUDED = {
   atlas_session_types_seeded: "dead key, seeding was replaced by suggestions",
   atlas_helio_deep_fetch_version: "re-asking deep is slow, never wrong",
   atlas_hr_rollup_backfill_2026_08_06: "additive repair, safe to re-run",
+  // Overwrites rather than adds, unlike the backfill above, but it recomputes
+  // resting heart rate from the raw samples rather than deleting anything, so
+  // re-running it after a restore produces the same answer. The rule this
+  // passes is the one the workout-timezone key fails: a migration is excludable
+  // when the next launch rebuilds it correctly.
+  atlas_resting_hr_night_scope_2026_08_14: "idempotent recompute, safe to re-run",
+  // A rolling diagnostic of what each refresh decided. Sixty lines about this
+  // phone's last few hours, useless on a restored one and rebuilt within
+  // minutes of use.
+  atlas_helio_sync_trail: "diagnostic ring buffer, rebuilt by use",
   atlas_theme_native: "written natively for the launch screen, mirrors atlas_theme",
   atlas_tour_seen: "a tour replaying once is not data loss",
   atlas_settings_intro_seen: "as above, for the settings explainer",

@@ -51,7 +51,7 @@ const date = computed({
 const helio = useHelioStore();
 const scroller = ref(null);
 const { pull, refreshing, armed, note } = usePullToRefresh(scroller, () =>
-  helio.refresh({ force: true }).catch(() => null)
+  helio.refresh({ force: true, trigger: "pull-food" }).catch(() => null)
 );
 // SCHEDULE is hidden, not deleted: ScheduleEditor.vue, the store's weekly
 // template and the lazy per-date seeding all still work, and putting the tab

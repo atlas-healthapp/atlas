@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   putSamples,
   clearAll,
@@ -7,6 +7,17 @@ import {
   downsampleOlderThan,
 } from "@/utils/sampleDb";
 import { rollupsForDate, dailyValuesFor, localDayBounds, dailyValuesForRange } from "@/utils/dailyRollup";
+
+// The suite runs in node, where there is no localStorage. `load` is guarded so
+// production code degrades to "no night known", but the resting-HR scoping is
+// about what happens when a night IS known, so the tests need a real one.
+const backing = new Map();
+globalThis.localStorage = {
+  getItem: (k) => (backing.has(k) ? backing.get(k) : null),
+  setItem: (k, v) => backing.set(k, String(v)),
+  removeItem: (k) => backing.delete(k),
+  clear: () => backing.clear(),
+};
 
 // Local midnight for the date under test, so the tests are timezone-independent.
 const DATE = "2026-07-24";
@@ -240,5 +251,69 @@ describe("dailyValuesForRange", () => {
       "2026-08-01",
       "2026-08-02",
     ]);
+  });
+});
+
+describe("resting heart rate is scoped to the night", () => {
+  const DATE = "2026-08-14";
+  const bed = new Date(`2026-08-13T23:10:00`).getTime();
+  const wake = new Date(`${DATE}T07:05:00`).getTime();
+  const at = (iso) => new Date(iso).getTime();
+
+  beforeEach(() => {
+    localStorage.setItem(
+      "atlas_checkins",
+      JSON.stringify([{ date: DATE, sleepStages: { bedTime: bed, wakeTime: wake } }])
+    );
+  });
+
+  afterEach(() => localStorage.removeItem("atlas_checkins"));
+
+  it("ignores a resting reading taken after you woke", async () => {
+    // The real shape, read off the phone on 2026-08-14: the band emitted three
+    // resting samples during the night and another at 09:26, forty minutes after
+    // waking. Taking the latest of the calendar day meant Recovery scored 57 at
+    // 09:17 and 52 at 09:28 with nothing new about the night in between.
+    await putSamples([
+      { metric: "restingHr", t: at(`${DATE}T04:46:00`), v: 57 },
+      { metric: "restingHr", t: at(`${DATE}T05:36:00`), v: 53 },
+      { metric: "restingHr", t: at(`${DATE}T09:26:00`), v: 52 },
+    ]);
+
+    const out = await rollupsForDate(DATE);
+    expect(out.restingHr).toBe(53);
+  });
+
+  it("takes a reading from before midnight, because a night starts the day before", async () => {
+    await putSamples([{ metric: "restingHr", t: at("2026-08-13T23:40:00"), v: 49 }]);
+    const out = await rollupsForDate(DATE);
+    expect(out.restingHr).toBe(49);
+  });
+
+  it("falls back to the whole day when the night is not known", async () => {
+    // Nights before 2026-08-04 carry no bedtime, and today has none until you
+    // have slept. Withholding the figure there would blank a metric that used to
+    // have one.
+    localStorage.removeItem("atlas_checkins");
+    await putSamples([{ metric: "restingHr", t: at(`${DATE}T09:26:00`), v: 52 }]);
+    const out = await rollupsForDate(DATE);
+    expect(out.restingHr).toBe(52);
+  });
+
+  it("scopes the heart-rate fallback to the night as well", async () => {
+    // With no device resting sample the figure is the tenth percentile of raw
+    // heart rate, and letting waking readings into that is how a date half an
+    // hour old returned 67 against a real nightly figure near 47.
+    await putSamples([
+      ...Array.from({ length: 20 }, (_, i) => ({
+        metric: "hr",
+        t: at(`${DATE}T0${1 + (i % 5)}:${10 + i}:00`),
+        v: 48,
+      })),
+      { metric: "hr", t: at(`${DATE}T10:00:00`), v: 95 },
+      { metric: "hr", t: at(`${DATE}T11:00:00`), v: 98 },
+    ]);
+    const out = await rollupsForDate(DATE);
+    expect(out.restingHr).toBeLessThan(60);
   });
 });

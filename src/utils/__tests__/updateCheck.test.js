@@ -22,7 +22,8 @@ describe("parseVersion", () => {
     // build has to compare as its base version or it would never be offered an
     // update.
     expect(parseVersion("1.0.5+a1b2c3d-dev")).toEqual([1, 0, 5]);
-    expect(parseVersion("1.0.5+a1b2c3d-dirty")).toEqual([1, 0, 5]);
+    // A build off a dirty tree carries no commit, since it is not that commit.
+    expect(parseVersion("1.0.5+dev")).toEqual([1, 0, 5]);
     expect(parseVersion("1.0.5+unknown-dev")).toEqual([1, 0, 5]);
   });
 

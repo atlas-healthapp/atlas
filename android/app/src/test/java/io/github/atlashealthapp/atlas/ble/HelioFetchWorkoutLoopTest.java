@@ -158,32 +158,49 @@ public class HelioFetchWorkoutLoopTest {
         }
     }
 
-    /** Whole minutes: timeBytes zeroes the seconds field on the wire. */
-    private static long at(final int day, final int hour, final int minute) {
+    /**
+     * A session that many days ago, at that time of day.
+     *
+     * **Relative to the clock, never a fixed date, and that is the whole point.**
+     * These were written as absolute July 2026 timestamps and two of them rotted
+     * into failures a fortnight later: a fetch with no stored cursor falls back to
+     * {@code sinceDays}, which is a rolling window ending now, so the scripted
+     * sessions aged out of it and the band correctly answered with nothing. The
+     * tests were then failing on their own fixtures rather than on the loop.
+     *
+     * Whole minutes, because timeBytes zeroes the seconds field on the wire.
+     * Whole days back, so every fixture stays in the past whatever the hour is
+     * when the suite runs.
+     */
+    private static long daysAgo(final int days, final int hour, final int minute) {
         final Calendar c = Calendar.getInstance(TimeZone.getDefault());
-        c.set(2026, Calendar.JULY, day, hour, minute, 0);
+        c.add(Calendar.DAY_OF_MONTH, -days);
+        c.set(Calendar.HOUR_OF_DAY, hour);
+        c.set(Calendar.MINUTE, minute);
+        c.set(Calendar.SECOND, 0);
         c.set(Calendar.MILLISECOND, 0);
         return c.getTimeInMillis();
     }
 
     @Test
     public void drainsEveryWorkoutAfterTheCursorInOneSync() {
-        final long stored = at(27, 18, 20);
-        final long first = at(29, 17, 53);
-        final long second = at(29, 19, 14);
+        final long stored = daysAgo(2, 18, 20);
+        final long first = daysAgo(1, 17, 53);
+        final long second = daysAgo(1, 19, 14);
 
-        final FakeBand band = new FakeBand(at(22, 17, 28), at(26, 13, 31), stored, first, second);
+        final FakeBand band =
+                new FakeBand(daysAgo(7, 17, 28), daysAgo(3, 13, 31), stored, first, second);
         band.run(stored);
 
-        // The bug: only the already-stored 27 Jul session came back, forever.
+        // The bug: only the session already on the cursor came back, forever.
         assertEquals(List.of(first, second), band.delivered);
         assertEquals(1, band.allFinished);
     }
 
     @Test
     public void asksFromAfterTheStoredCursorNotFromAWindowThatIncludesIt() {
-        final long stored = at(27, 18, 20);
-        final FakeBand band = new FakeBand(stored, at(29, 17, 53));
+        final long stored = daysAgo(2, 18, 20);
+        final FakeBand band = new FakeBand(stored, daysAgo(1, 17, 53));
         band.run(stored);
 
         // Every since-date must be strictly past the newest session already held,
@@ -197,7 +214,7 @@ public class HelioFetchWorkoutLoopTest {
 
     @Test
     public void advancesByAWholeMinuteSoTheZeroedSecondsCannotLandBackOnTheSameSession() {
-        final long first = at(29, 17, 53);
+        final long first = daysAgo(1, 17, 53);
         final FakeBand band = new FakeBand(first);
         band.run(0L);
 
@@ -210,7 +227,7 @@ public class HelioFetchWorkoutLoopTest {
 
     @Test
     public void stopsWhenTheBandHasNothingNewerRatherThanAskingForever() {
-        final FakeBand band = new FakeBand(at(29, 17, 53));
+        final FakeBand band = new FakeBand(daysAgo(1, 17, 53));
         band.run(0L);
 
         assertEquals(1, band.allFinished);
@@ -220,8 +237,8 @@ public class HelioFetchWorkoutLoopTest {
     public void withNoStoredCursorItStillReachesTheNewestSession() {
         // The background service has no IndexedDB to read a cursor from, so it
         // connects with 0 and relies entirely on the loop.
-        final long newest = at(29, 19, 14);
-        final FakeBand band = new FakeBand(at(27, 18, 20), at(29, 17, 53), newest);
+        final long newest = daysAgo(1, 19, 14);
+        final FakeBand band = new FakeBand(daysAgo(2, 18, 20), daysAgo(1, 17, 53), newest);
         band.run(0L);
 
         assertTrue(band.delivered.contains(newest));

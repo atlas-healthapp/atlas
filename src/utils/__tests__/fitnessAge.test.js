@@ -15,9 +15,10 @@ import {
   MIN_ACTIVITY_DAYS,
   MAX_WEIGHT_AGE_DAYS,
   MAX_GAP_YEARS,
-  AGE_MIN,
+  maxGapYears,
   AGE_MIN,
   AGE_MAX,
+  INPUT_REFERENCE,
 } from "@/utils/fitnessAge";
 
 /**
@@ -84,6 +85,33 @@ describe("ageForVo2max", () => {
       const vo2 = referenceVo2max(age, "male");
       expect(ageForVo2max(vo2, "male").age).toBeCloseTo(age, 5);
     }
+  });
+
+  it("extends past the top anchor rather than falling off a cliff at it", () => {
+    // This was the model's worst artifact and it was in the lookup, not in any
+    // of the arithmetic above it: anything above the 20-29 mean of 54.4 returned
+    // AGE_MIN outright, so 0.1 mL/kg/min bought five years. A real reading of
+    // 54.5 reported 20 where it resolves to 24.8.
+    const justOver = ageForVo2max(54.5, "male");
+    expect(justOver.age).toBeGreaterThan(24);
+    expect(justOver.age).toBeLessThan(25);
+    expect(justOver.clamped).toBe(false);
+    expect(justOver.extrapolated).toBe(true);
+
+    // Along the published 25-to-35 slope, not an invented one.
+    const perYear = (54.4 - 49.1) / 10;
+    expect(ageForVo2max(54.4 + perYear, "male").age).toBeCloseTo(24, 5);
+  });
+
+  it("still stops at the youngest age the extension can honestly reach", () => {
+    // The floor is not arbitrary. The reference is decade means anchored at
+    // midpoints, so extending to 20 implies a mean near 57 for a twenty-year-old,
+    // which is a real figure for this cohort. Below that aerobic capacity
+    // plateaus rather than continuing to climb, so the trend stops describing
+    // anybody and a very fit reading is reported as unresolvable instead.
+    const elite = ageForVo2max(70, "male");
+    expect(elite.age).toBe(AGE_MIN);
+    expect(elite.clamped).toBe(true);
   });
 
   it("clamps rather than extrapolating past a fitness the cohort never measured", () => {
@@ -301,10 +329,16 @@ describe("the gap cap", () => {
     expect(out.fitnessAge).toBeCloseTo(32 + MAX_GAP_YEARS, 10);
   });
 
-  it("keeps the cap inside the reference curve's own range", () => {
-    // A 24-year-old cannot be capped to 14.5: AGE_MIN still wins.
+  it("lets a young person read younger, bounded by the cap rather than by 20", () => {
+    // AGE_MIN used to floor this, which made sense while the figure was read off
+    // a curve that stopped at 20. Measured after the anchoring, that floor bit
+    // before the cap did, so a fit twenty-year-old and an average one both
+    // printed exactly 20 and the metric said nothing about the difference. The
+    // cap already scales with age, so it is the only bound needed.
     const out = computeFitnessAge(person(24, 21, 48, 30));
-    expect(out.fitnessAge).toBeGreaterThanOrEqual(AGE_MIN);
+    expect(out.fitnessAge).toBeCloseTo(24 - maxGapYears(24), 8);
+    expect(out.fitnessAge).toBeLessThan(AGE_MIN);
+    expect(out.capped).toBe(true);
   });
 
   it("does not touch the VO2max or the itemised terms", () => {
@@ -370,36 +404,55 @@ describe("computeFitnessAge arithmetic", () => {
   });
 
   it("moves the right way for each input on its own", () => {
-    const base = computeFitnessAge(ok).fitnessAge;
-    expect(computeFitnessAge({ ...ok, restingHr: 60 }).fitnessAge).toBeGreaterThan(base);
-    expect(computeFitnessAge({ ...ok, weightKg: 92 }).fitnessAge).toBeGreaterThan(base);
-    expect(computeFitnessAge({ ...ok, paIndex: 12 }).fitnessAge).toBeLessThan(base);
+    // Read off the UNCAPPED figure. The cap saturates readily now that it is six
+    // years rather than nine and a half, so two genuinely different people can
+    // print the same number, and a test on the printed one would be asserting
+    // the cap rather than the model.
+    const raw = (o) => computeFitnessAge({ ...ok, ...o }).uncappedAge;
+    const base = raw({});
+    expect(raw({ restingHr: 60 })).toBeGreaterThan(base);
+    expect(raw({ weightKg: 92 })).toBeGreaterThan(base);
+    expect(raw({ paIndex: 12 })).toBeLessThan(base);
   });
 
-  it("reports the reference person's own reading rather than assuming it is your age", () => {
-    // Where the published thresholds do not land on the Loe curve, that gap is
-    // the cohort mismatch the whole ticket is about. It is reported, not hidden.
+  it("gives the reference person their own age back, which is what anchoring buys", () => {
+    // The old reference was three different kinds of figure - a WHO BMI
+    // threshold, an age-matched resting rate and a cohort activity mean - and it
+    // described nobody, so it did not land on its own age and the gap it left
+    // moved with age. The reference is now this cohort's average person, whose
+    // fitness age is their chronological age by construction.
     const out = computeFitnessAge(ok);
-    expect(out.referenceAge).toBeGreaterThan(0);
+    expect(out.referenceAge).toBe(ok.age);
     expect(out.referenceVo2max).toBeGreaterThan(0);
   });
 
-  it("flags a figure that had to be clamped at the end of the reference data", () => {
+  it("flags a figure that landed outside the ages the study contained", () => {
     const out = computeFitnessAge({ ...ok, restingHr: 32, weightKg: 62, paIndex: 15 });
-    // Two different limits, and the distinction is the point. `clamped` says the
-    // reference curve ran out - a fitness the cohort never measured. `capped`
-    // says the +-9.5 presentation limit bit afterwards. Reading AGE_MIN here
-    // would mean the cap had not been applied.
+    // Two different limits and the distinction is the point. `clamped` says the
+    // honest answer fell outside 20-90, which nobody in the cohort was, so the
+    // linear age term has run off the data. `capped` says the presentation limit
+    // then bit. The uncapped figure is reported raw, negative if that is what the
+    // model said, because rounding it into the reference range would disguise
+    // how far out it went.
     expect(out.clamped).toBe(true);
-    expect(out.uncappedAge).toBe(AGE_MIN);
+    expect(out.uncappedAge).toBeLessThan(AGE_MIN);
     expect(out.capped).toBe(true);
-    expect(out.fitnessAge).toBeCloseTo(ok.age - MAX_GAP_YEARS, 10);
+    expect(out.fitnessAge).toBeCloseTo(ok.age - maxGapYears(ok.age), 10);
   });
 });
 
 describe("compareBodyModels", () => {
-  /** A 34-year-old man, 50 bpm resting, meeting the activity guidelines. */
-  const man = { ...ok, paIndex: 7.5, heightCm: 180 };
+  /**
+   * A 34-year-old man, 50 bpm resting, as active as the study's own average.
+   *
+   * 10.5 rather than the 7.5 this fixture used to carry: that was a guideline
+   * threshold on the Kurtze scale, and on the New index the same number describes
+   * someone well below average instead. Nothing about the comparison depends on
+   * which is used - the point is the two body-composition forms - but a fixture
+   * quietly describing the wrong scale is how the index bug survived as long as
+   * it did.
+   */
+  const man = { ...ok, paIndex: 10.5, heightCm: 180 };
 
   it("has nothing to compare unless both readings exist", () => {
     expect(compareBodyModels(man)).toBeNull();
@@ -419,7 +472,10 @@ describe("compareBodyModels", () => {
     // Both read older on BMI, and the heavier one much more so.
     expect(lean.yearsDelta).toBeGreaterThan(0);
     expect(muscular.yearsDelta).toBeGreaterThan(lean.yearsDelta + 3);
-    expect(muscular.yearsDelta).toBeLessThan(12);
+    // Measured at 15.0. Wide, and honestly so: this is the uncapped model, where
+    // one BMI unit is nearly three years, and it is the cost the no-waist
+    // constraint puts on anyone carrying muscle.
+    expect(muscular.yearsDelta).toBeLessThan(18);
   });
 
   it("prices one BMI unit against one centimetre of waist", () => {
@@ -464,7 +520,13 @@ describe("fitnessAgeBreakdown", () => {
       const out = computeFitnessAge(profile);
       const rows = fitnessAgeBreakdown(out);
       const total = rows.reduce((sum, r) => sum + r.years, 0);
-      expect(total).toBeCloseTo(out.fitnessAge - out.referenceAge, 8);
+      // **Against the uncapped figure, and a page showing both has to say so.**
+      // The rows are the model's own itemisation and they sum to what it
+      // actually said; the cap is applied afterwards to what gets printed. On a
+      // capped card the rows will not add to the headline, and pretending
+      // otherwise would mean scaling the itemisation to fit, which is the kind
+      // of quiet fudge this whole ticket exists to refuse.
+      expect(total).toBeCloseTo(out.uncappedAge - out.referenceAge, 8);
     }
   });
 
@@ -472,7 +534,7 @@ describe("fitnessAgeBreakdown", () => {
     const out = computeFitnessAge({ ...ok, restingHr: 74, weightKg: 100, paIndex: 1 });
     const rows = fitnessAgeBreakdown(out);
     const total = rows.reduce((sum, r) => sum + r.years, 0);
-    expect(total).toBeCloseTo(out.fitnessAge - out.referenceAge, 8);
+    expect(total).toBeCloseTo(out.uncappedAge - out.referenceAge, 8);
   });
 
   it("scores an input sitting on its reference at zero years", () => {
@@ -493,6 +555,115 @@ describe("fitnessAgeBreakdown", () => {
   it("does not mark the resting-heart-rate row approximate, since a sex is required", () => {
     const rhr = fitnessAgeBreakdown(computeFitnessAge(ok)).find((r) => r.key === "restingHr");
     expect(rhr.approximate).toBe(false);
+  });
+});
+
+/**
+ * The check the wrong-activity-index bug got past, and the reason it existed.
+ *
+ * Every other test here asserts a relationship (more activity reads younger) or
+ * an endpoint (the curve round-trips at its own anchors), and the index bug broke
+ * neither: it fed a 0-15 quantity into a coefficient fitted on a 0-45 one, which
+ * moves every figure by the same few years and leaves every relationship intact.
+ * What catches that is only ever the middle - feed the published cohort back into
+ * the model and check it reproduces the published answer.
+ *
+ * **Men only, deliberately.** Nes 2011 Table 1 reports its means by sex and only
+ * the male row was ever written down in this repo. Running a male cohort's BMI
+ * and resting rate through the female equation would be inventing a woman, which
+ * is the exact error the withdrawn "twelve-year bias" claim was made of.
+ */
+describe("calibration against the published cohort", () => {
+  /** Nes 2011 Table 1, men: the sample the coefficients were fitted on. */
+  const COHORT = { age: 48.9, bmi: 26.6, waist: 94.7, restingHr: 57.4, vo2peak: 44.4 };
+
+  const solveForPa = (coef, body) =>
+    (COHORT.vo2peak -
+      coef.intercept -
+      coef.age * COHORT.age -
+      coef.body * body -
+      coef.restingHr * COHORT.restingHr) /
+    coef.pa;
+
+  it("recovers the reference activity index from both published male models", () => {
+    // The paper never prints the cohort's mean New-index value - Table 1's 3.27
+    // is the superseded Kurtze index - so it is solved for instead. Two
+    // independently sourced equations landing on the same latent quantity is what
+    // makes 10.5 a measurement rather than a guess, and it is also the only
+    // corroboration the BMI coefficients have, since they appear in no paper.
+    //
+    // Half a point of tolerance, because the published mean VO2peak is quoted as
+    // both 44.3 and 44.4 in different places and that alone moves the answer by
+    // ~0.4. Anything wider than this and the two models are not describing the
+    // same cohort.
+    const waist = solveForPa(HUNT_MODELS.waist.male, COHORT.waist);
+    const bmi = solveForPa(HUNT_MODELS.bmi.male, COHORT.bmi);
+
+    expect(Math.abs(waist - bmi)).toBeLessThan(0.5);
+    expect(waist).toBeCloseTo(INPUT_REFERENCE.pa.value, 0);
+    expect(bmi).toBeCloseTo(INPUT_REFERENCE.pa.value, 0);
+  });
+
+  it("reproduces the cohort's measured VO2peak when fed that reference", () => {
+    // The same statement in the other direction, and the one that fails loudly if
+    // the index scale is ever swapped back: at a Kurtze-scale 3.27 both models
+    // come out ~1.7 mL/kg/min low, which the reference curve turns into years.
+    for (const [key, body] of [
+      ["waist", COHORT.waist],
+      ["bmi", COHORT.bmi],
+    ]) {
+      const coef = HUNT_MODELS[key].male;
+      const predicted =
+        coef.intercept +
+        coef.age * COHORT.age +
+        coef.body * body +
+        coef.restingHr * COHORT.restingHr +
+        coef.pa * INPUT_REFERENCE.pa.value;
+      expect(predicted).toBeCloseTo(COHORT.vo2peak, 0);
+    }
+  });
+
+  /** The cohort's average man, aged up and down. Every input held at its mean. */
+  const averageMan = (age) => ({
+    age,
+    sex: "male",
+    heightCm: 180,
+    weightKg: COHORT.bmi * 1.8 ** 2,
+    weightDaysOld: 1,
+    restingHr: COHORT.restingHr,
+    restingHrDays: MIN_RESTING_HR_DAYS,
+    paIndex: INPUT_REFERENCE.pa.value,
+    activityDays: MIN_ACTIVITY_DAYS,
+  });
+
+  it("gives an average man roughly his own age, which is the whole claim", () => {
+    // Roughly, not exactly. Two papers on two samples cannot agree perfectly, and
+    // the residual here is about 1 mL/kg/min - HUNT calls the average 48.9-year-old
+    // man 44.3 where Loe's curve calls him ~45.4. That gap is the cohort mismatch
+    // the ticket says belongs on the page, not a bug to be offset away.
+    for (const age of [32, 49, 60]) {
+      const out = computeFitnessAge(averageMan(age));
+      expect(out.state).toBe("ready");
+      expect(out.capped).toBe(false);
+      expect(Math.abs(out.gap)).toBeLessThan(5);
+    }
+  });
+
+  it("gives the average man his own age at every age, with no drift", () => {
+    // **This is what anchoring to the equation bought, and it was measured
+    // before and after.** Read off Loe's decade curve, the same average man read
+    // between 0.2 years young and 5.4 years old depending only on his age: that
+    // curve is published as decade means, so its slope swings from -0.53 to
+    // -0.19 to -0.46 while the equation falls linearly at -0.327, and inverting
+    // a nearly flat segment amplifies the residual between the two papers. At 40
+    // it put him +4.7 before anything about him was considered, which a six-year
+    // cap leaves no room to distinguish from a sedentary man.
+    //
+    // Anchored on the cohort's own average, the drift is not merely smaller, it
+    // is zero by construction, and that is the property worth pinning.
+    for (let age = 22; age <= 70; age++) {
+      expect(computeFitnessAge(averageMan(age)).uncappedAge).toBeCloseTo(age, 8);
+    }
   });
 });
 

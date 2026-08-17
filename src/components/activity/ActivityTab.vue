@@ -195,7 +195,7 @@ const routineOpen = ref(false);
 
 const scroller = ref(null);
 const { pull, refreshing, armed, note } = usePullToRefresh(scroller, async () => {
-  const reason = await helio.refresh({ force: true }).catch(() => null);
+  const reason = await helio.refresh({ force: true, trigger: "pull-fitness" }).catch(() => null);
   await loadWindow();
   return reason;
 });

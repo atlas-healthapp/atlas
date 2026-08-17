@@ -15,10 +15,27 @@
 <template>
   <SettingsSection
     title="ALARM"
-    :summary="`${setTime} · ${setDays}`"
+    :summary="closedSummary"
+    :danger="needsExact"
     :open="open"
     @toggle="$emit('toggle')"
   >
+
+    <!-- Above everything, and shown while editing as well: without this the
+         smart modes silently degrade to firing at the set time, and the phone is
+         the only thing that knows. It says what still works, because "cannot
+         run" on its own reads as an alarm that will not go off at all. -->
+    <div v-if="needsExact" class="permbox">
+      <div class="permhd mono">SMART WAKE CANNOT RUN</div>
+      <div class="modenote mono">
+        ANDROID IS NOT LETTING ATLAS SET AN EXACT ALARM, SO THE PHONE CANNOT WAKE UP
+        IN TIME TO CHECK WHETHER YOU ARE IN LIGHT SLEEP. YOUR ALARM STILL GOES OFF
+        AT {{ fallbackTime }}.
+      </div>
+      <button class="databtn primary mono" type="button" @click="helio.requestExactAlarm()">
+        ALLOW EXACT ALARMS
+      </button>
+    </div>
 
     <div v-if="!editing" class="arow">
       <div class="left">
@@ -244,6 +261,51 @@ const setDays = computed(() => {
   if (!helio.alarm) return "NONE SET";
   return helio.alarm.enabled ? describeDays(helio.alarm.days) : "OFF";
 });
+
+/**
+ * The time actually sitting on the strap, which is what the alarm falls back to
+ * when the phone cannot run the smart part.
+ *
+ * Separate from `setTime` because that one is a label and this one is a claim: it
+ * goes into a sentence promising you will still be woken, so it must not carry
+ * "SMART · BY" in front of it.
+ */
+const fallbackTime = computed(() => {
+  const a = helio.alarm;
+  if (!a) return "--:--";
+  if (a.mode === "onset" && a.latestHour != null) {
+    return formatTime(a.latestHour, a.latestMinute ?? 0);
+  }
+  return formatTime(a.hour, a.minute);
+});
+
+/**
+ * Whether to say anything about the exact-alarm permission.
+ *
+ * **Gated on the mode, not just on the permission.** A fixed alarm is written to
+ * the strap and rung by the strap, so it needs nothing from Android and warning
+ * about a permission it does not use would be pure noise. Smart and onset both
+ * have the phone decide a time during the night, which is what needs the exact
+ * wakeup.
+ *
+ * `askable` keeps this quiet below Android 12, where there is no such permission
+ * and nothing the button could open.
+ */
+const needsExact = computed(() => {
+  const a = helio.alarm;
+  if (!a || !a.enabled) return false;
+  if ((a.mode ?? "fixed") === "fixed") return false;
+  return helio.exactAlarm.askable && !helio.exactAlarm.granted;
+});
+
+/**
+ * The fault replaces the time rather than joining it. `SMART · BY 08:45 ·
+ * PERMISSION NEEDED` is three facts on a single nowrap line with an ellipsis at
+ * the end of it, and the one that gets cut is the one worth reading.
+ */
+const closedSummary = computed(() =>
+  needsExact.value ? "PERMISSION NEEDED" : `${setTime.value} · ${setDays.value}`
+);
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -491,6 +553,22 @@ async function send() {
   line-height: 1.5;
   color: var(--dim);
   margin-bottom: 4px;
+}
+/* No border and no tinted panel: this already sits inside a card, and a box
+   drawn inside a box is the treatment the whole app moved off on 2026-08-04.
+   Space and one red line do the separating. */
+.permbox {
+  margin-bottom: 14px;
+}
+.permhd {
+  margin-bottom: 4px;
+  font-size: var(--fs-micro);
+  letter-spacing: 1px;
+  color: var(--bad);
+}
+/* .databtn is built to share a flex row; on its own it needs telling to fill. */
+.permbox .databtn {
+  width: 100%;
 }
 .onsetrow {
   display: flex;

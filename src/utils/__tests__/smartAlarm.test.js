@@ -44,6 +44,41 @@ describe("currentStage", () => {
     expect(currentStage({ bedTime: new Date() }, Date.now())).toBeNull();
     expect(currentStage(session([]), Date.now())).toBeNull();
   });
+
+  it("takes a bedtime that has been through storage, which arrives as epoch ms", () => {
+    // sleepStages is persisted as JSON, so a Date does not survive a reload.
+    const s = session([["light", 60]]);
+    const stored = { ...s, bedTime: s.bedTime.getTime() };
+    expect(currentStage(stored, at("2026-08-11T00:30:00"))).toEqual(
+      currentStage(s, at("2026-08-11T00:30:00"))
+    );
+  });
+
+  it("refuses a bedtime in any other shape instead of computing on NaN", () => {
+    // The failure this guards is silent and one-sided. Taken as-is, a string
+    // bedtime makes every comparison below false and staleMinutes NaN, and
+    // `NaN > maxStaleMinutes` is false - so the staleness check passes and a
+    // reading hours out of date is treated as describing now.
+    const s = session([["light", 60]]);
+    for (const bad of ["2026-08-11T00:00:00", new Date("nonsense"), {}, NaN]) {
+      expect(currentStage({ ...s, bedTime: bad }, at("2026-08-11T00:30:00"))).toBeNull();
+    }
+  });
+
+  it("does not fire on a bedtime it could not read", () => {
+    // The end of that path, through the decision the service actually asks for.
+    const night = session([
+      ["light", 400],
+      ["deep", 40],
+    ]);
+    const out = smartDecision({
+      session: { ...night, bedTime: "2026-08-11T00:00:00" },
+      nowMillis: at("2026-08-11T06:50:00"),
+      alarmMillis: at("2026-08-11T07:00:00"),
+    });
+    expect(out.fire).toBe(false);
+    expect(out.reason).toBe("NO READING");
+  });
 });
 
 describe("smartDecision", () => {

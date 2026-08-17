@@ -545,6 +545,11 @@ public class HelioBlePlugin extends Plugin {
         // A new plan clears the "already woken you tonight" mark, so changing the
         // alarm during the evening does not silently disarm the window.
         edit.remove(SmartAlarm.KEY_FIRED_ON);
+        // And the debt owed by a spent one-off, because this call only ever
+        // follows the band accepting the very write that debt was asking for.
+        // Left in place, the service would connect again later to set an alarm
+        // the strap is already holding.
+        edit.remove(SmartAlarm.KEY_REARM_AFTER);
         edit.apply();
 
         emit("alarmPlan", "alarm plan stored for the background service");
@@ -555,6 +560,65 @@ public class HelioBlePlugin extends Plugin {
     public void refreshNotification(final PluginCall call) {
         HelioSyncService.refreshNotification(getContext());
         call.resolve();
+    }
+
+    /**
+     * Whether the phone will let Atlas book the exact alarm the smart wake needs.
+     *
+     * <p><b>`askable` is separate from `granted` on purpose.</b> Below Android 12
+     * there is no such permission and nothing to send anybody to, so a screen must
+     * be able to tell "you need to grant this" apart from "this phone has no such
+     * setting" - offering a button that opens nothing is worse than staying quiet.
+     */
+    @PluginMethod
+    public void exactAlarmState(final PluginCall call) {
+        final JSObject result = new JSObject();
+        result.put("granted", HelioSyncService.canBeExact(getContext()));
+        result.put("askable", Build.VERSION.SDK_INT >= Build.VERSION_CODES.S);
+        call.resolve(result);
+    }
+
+    /**
+     * Opens the system screen that grants exact alarms.
+     *
+     * <p>There is no in-app dialog for this one: it is a special app access, so
+     * the only route is the Settings screen and the user has to come back by
+     * themselves. Which is why the caller re-reads {@link #exactAlarmState} on
+     * resume rather than trusting what it knew before leaving.
+     *
+     * <p>Falls back to the app's own details page if the phone has no such screen.
+     * {@code ACTION_REQUEST_SCHEDULE_EXACT_ALARM} is documented from API 31, but an
+     * OEM build that has stripped it would otherwise throw
+     * {@code ActivityNotFoundException} out of a button that promises to fix
+     * something.
+     */
+    @PluginMethod
+    public void requestExactAlarm(final PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            call.resolve();
+            return;
+        }
+        final android.net.Uri self =
+                android.net.Uri.parse("package:" + getContext().getPackageName());
+        try {
+            final android.content.Intent ask =
+                    new android.content.Intent(
+                            android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, self);
+            ask.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(ask);
+            call.resolve();
+        } catch (final Exception e) {
+            try {
+                final android.content.Intent details =
+                        new android.content.Intent(
+                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, self);
+                details.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(details);
+                call.resolve();
+            } catch (final Exception fallback) {
+                call.reject("could not open the alarm permission screen: " + fallback.getMessage());
+            }
+        }
     }
 
     @PluginMethod

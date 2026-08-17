@@ -415,4 +415,37 @@ describe("helio refresh", () => {
     emit({ event: "fetchComplete" });
     await first;
   });
+
+  it("admits one of three refreshes fired on the same tick, not all three", async () => {
+    // **This is the case the test above does not cover, and it happened.** That
+    // one starts a sync and THEN refreshes, so `syncing` is already true by the
+    // time the guard reads it. Three listeners firing together never give it
+    // that chance: `syncing` is set several awaits inside the sync, so all three
+    // pass the check before any of them arrives.
+    //
+    // Read off the phone on 2026-08-14 at 10:37:18 - resume, visibilitychange
+    // and the five-minute tick on the same second, all three opening a link. The
+    // band takes one central at a time, so two came back as failures and showed
+    // as a sync error for a sync that worked.
+    const store = connectedStore();
+    plugin.connect.mockImplementation(async () => {});
+
+    // Started together and not awaited yet: the whole point is what happens
+    // when all three are in flight at once.
+    const pending = [
+      store.refresh({ force: true, trigger: "resume" }),
+      store.refresh({ force: true, trigger: "visible" }),
+      store.refresh({ force: true, trigger: "tick" }),
+    ];
+    // The admitted one reaches the plugin a few awaits in, so the reply cannot
+    // be emitted until it has: emitting earlier lands before anything is
+    // listening and the sync never finishes.
+    await vi.waitFor(() => expect(plugin.connect).toHaveBeenCalled());
+    emit({ event: "fetchComplete" });
+    const [a, b, c] = await Promise.all(pending);
+
+    const declined = [a, b, c].filter((r) => /ALREADY RUNNING/.test(r ?? ""));
+    expect(declined).toHaveLength(2);
+    expect(plugin.connect).toHaveBeenCalledTimes(1);
+  });
 });

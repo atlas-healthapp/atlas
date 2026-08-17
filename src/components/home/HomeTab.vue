@@ -569,7 +569,17 @@ const recoveryMeta = computed(() => {
   if (recovery.value.state === "calibrating") {
     return `CALIBRATING · ${recovery.value.nights}/${recovery.value.needed} NIGHTS`;
   }
-  return recovery.value.state === "ready" ? recovery.value.label : "NO DATA";
+  if (recovery.value.state !== "ready") return "NO DATA";
+  // **Between midnight and waking the score is last night's, and it has to say
+  // so.** Recovery scores a date, and a date that has only just begun carries no
+  // sleep and no HRV, so it used to be scored from a waking resting heart rate
+  // alone: measured at 00:32, that read 38 against a run of high fifties. It now
+  // steps back a day rather than inventing a number, and naming the night is
+  // what keeps that from being a quieter lie than the one it replaced.
+  if (recovery.value.fromPreviousNight) {
+    return `${recovery.value.label} · LAST NIGHT`;
+  }
+  return recovery.value.label;
 });
 const recoveryExplanationText = computed(() => recoveryExplanation(recovery.value));
 /**
@@ -685,7 +695,7 @@ const scroller = ref(null);
 const { pull, refreshing, armed, note } = usePullToRefresh(scroller, async () => {
   // Returned, not swallowed: a refresh that declined to run says why, and the
   // indicator holds that line up for a moment instead of shutting silently.
-  const reason = await helio.refresh({ force: true }).catch(() => null);
+  const reason = await helio.refresh({ force: true, trigger: "pull-home" }).catch(() => null);
   await Promise.all([loadStress(), loadWindow()]);
   return reason;
 });

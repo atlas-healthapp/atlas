@@ -12,7 +12,7 @@ import {
 } from "@/sources/helioBleSource";
 import { ingestSamples, commitSleepSessions, commitWorkouts } from "@/utils/sampleIngest";
 import { clearWorkouts, newestWorkoutStart } from "@/utils/sampleDb";
-import { backfillRollupKeys } from "@/utils/dailyRollup";
+import { backfillRollupKeys, rescopeRestingHrToNights } from "@/utils/dailyRollup";
 import { repeatMask } from "@/utils/strapAlarm";
 
 // Direct BLE link to the Helio Strap, with no Gadgetbridge and no Zepp in the
@@ -35,6 +35,25 @@ const LAST_SYNC_KEY = "atlas_helio_last_sync";
 // band and spends its battery; five minutes is well inside "the number on
 // screen is current" while collapsing a burst of unlocks into one sync.
 const REFRESH_MIN_AGE_MS = 5 * 60 * 1000;
+
+/**
+ * How many refresh decisions to keep, and where.
+ *
+ * **Modelled on the alarm trail, and for the same reason it exists.** The smart
+ * alarm went three weeks writing alarms that never left the phone because the
+ * log recorded the decision and never the outcome, so every morning looked like
+ * it had worked. `refresh()` has exactly that shape: it returns a reason when it
+ * declines, every automatic caller drops it on the floor, and a resume that
+ * chose not to sync is indistinguishable from one that never fired.
+ *
+ * Measured against the real case on 2026-08-14: the app was resumed after a
+ * night, showed numbers from a background sync ten minutes earlier, and did not
+ * fetch. `connected` was true and the rate limit had expired, so neither of the
+ * two obvious causes fits, and there is no way to tell whether the trigger fired
+ * at all. That is what this closes.
+ */
+const SYNC_TRAIL_KEY = "atlas_helio_sync_trail";
+const SYNC_TRAIL_MAX = 60;
 const BATTERY_KEY = "atlas_helio_battery";
 // The alarm Atlas last WROTE, which is not the same claim as the alarm the band
 // is holding: nothing here can read its slots back, and they are shared with
@@ -74,6 +93,7 @@ const WORKOUT_TZ_FIX_KEY = "atlas_helio_workout_tz_fixed_2026_07_28";
 
 // One-off: fills `hr` into rollups frozen before heart rate had one of its own.
 const HR_ROLLUP_BACKFILL_KEY = "atlas_hr_rollup_backfill_2026_08_06";
+const RESTING_HR_NIGHT_SCOPE_KEY = "atlas_resting_hr_night_scope_2026_08_14";
 // The deep fetch, and the version of the record it was last run for.
 //
 // A night is committed once and then only ever re-asked for by a fetch that
@@ -203,6 +223,49 @@ export const useHelioStore = defineStore("helio", () => {
   function _setConnected(value) {
     connected.value = value;
     persist(CONNECTED_KEY, value);
+  }
+
+  /**
+   * Whether the phone will let the background service book the exact alarm the
+   * smart wake depends on, and whether there is a screen to ask on.
+   *
+   * **Defaults to granted.** Every screen reading this is deciding whether to warn
+   * somebody, and the check is one async hop away on mount: starting at `false`
+   * would flash "permission needed" at everybody whose permission is fine. The
+   * cost of the optimistic default is one render of silence on a phone that does
+   * need asking, which is the right way round.
+   *
+   * Not persisted. It is a fact about the phone, not about Atlas, and it can
+   * change while the app is closed - which is exactly the stale answer this is
+   * re-read on resume to avoid.
+   */
+  const exactAlarm = ref({ granted: true, askable: false });
+
+  async function checkExactAlarm() {
+    try {
+      const state = await HelioBle.exactAlarmState();
+      exactAlarm.value = {
+        granted: state?.granted !== false,
+        askable: state?.askable === true,
+      };
+    } catch {
+      // No plugin (the dev server) or an old build without the method. Silence is
+      // right here: a browser cannot grant an Android permission, so warning
+      // about one would be noise nobody can act on.
+      exactAlarm.value = { granted: true, askable: false };
+    }
+  }
+
+  /**
+   * Send the user to the system screen. Nothing comes back from it, by design:
+   * there is no result and no callback, so the answer is re-read on resume.
+   */
+  async function requestExactAlarm() {
+    try {
+      await HelioBle.requestExactAlarm();
+    } catch {
+      // Nothing to say. The panel keeps showing the row, which is still true.
+    }
   }
 
   /**
@@ -724,6 +787,7 @@ export const useHelioStore = defineStore("helio", () => {
     // Before the strap check: this repairs stored data and owes nothing to a
     // band being connected.
     await backfillHeartRateRollups();
+    await rescopeRestingHr();
     if (!connected.value) return;
     await migrateWorkoutTimezoneFix();
     await hydrate();
@@ -756,9 +820,64 @@ export const useHelioStore = defineStore("helio", () => {
    * band refusing the link, and the rate limit. Naming them costs a line and
    * saves guessing at a screen that just sat there.
    */
-  async function refresh({ force = false } = {}) {
-    if (!connected.value) return "NO STRAP CONNECTED";
-    if (syncing.value) return "A SYNC IS ALREADY RUNNING";
+  /**
+   * Record what a refresh decided, whatever it decided.
+   *
+   * **Inside `refresh` rather than at each call site**, which is the whole
+   * lesson from the alarm: a caller that has to remember to record its own
+   * outcome eventually does not, and the one that forgets is the one that
+   * breaks. Every path out of `refresh` passes through here.
+   */
+  function noteRefresh(trigger, outcome) {
+    try {
+      const at = new Date().toLocaleTimeString("en-GB", { hour12: false });
+      const trail = load(SYNC_TRAIL_KEY, []) ?? [];
+      trail.push(`${at} ${trigger} ${outcome}`);
+      persist(SYNC_TRAIL_KEY, trail.slice(-SYNC_TRAIL_MAX));
+    } catch {
+      // A diagnostic must never be the thing that breaks a sync.
+    }
+  }
+
+  /**
+   * True from the synchronous instant a refresh is admitted until it is done.
+   *
+   * **`syncing` cannot do this job and the trail caught it not doing it.** That
+   * flag is set inside the sync, which is several awaits away, so every caller
+   * that arrives before the first one gets there passes the guard. Measured on
+   * 2026-08-14 at 10:37:18: the resume listener, the visibility listener and the
+   * five-minute tick all fired on the same second, all three read `syncing` as
+   * false, and all three went through to open a link. The band takes one central
+   * at a time, so the second and third were refused by the link lock and came
+   * back as failures - which is a sync error on screen for a sync that was
+   * working perfectly.
+   *
+   * A plain local rather than a ref: nothing renders it, and the whole point is
+   * that it changes in the same tick it is read. `syncing` keeps its own job,
+   * which is telling the header a sync is running.
+   */
+  let refreshInFlight = false;
+
+  async function refresh({ force = false, trigger = "unknown" } = {}) {
+    if (!connected.value) {
+      noteRefresh(trigger, "declined: no strap connected");
+      return "NO STRAP CONNECTED";
+    }
+    if (syncing.value || refreshInFlight) {
+      noteRefresh(trigger, "declined: already syncing");
+      return "A SYNC IS ALREADY RUNNING";
+    }
+    // Claimed here, before the first await, or this guard has the same hole as
+    // the one above it.
+    refreshInFlight = true;
+    try {
+      return await runRefresh({ force, trigger });
+    } finally {
+      refreshInFlight = false;
+    }
+  }
+
+  async function runRefresh({ force, trigger }) {
     const age = lastSyncAt.value ? Date.now() - lastSyncAt.value : Infinity;
     if (!force && age < REFRESH_MIN_AGE_MS) {
       // Drain first, THEN give up. The rate limit exists to protect the strap's
@@ -772,8 +891,10 @@ export const useHelioStore = defineStore("helio", () => {
       // WebView can read, so anything it found inside the last five minutes sat
       // there unread.
       await drainBackground().catch(() => null);
+      noteRefresh(trigger, `declined: synced ${Math.round(age / 1000)}s ago`);
       return "SYNCED IN THE LAST FIVE MINUTES";
     }
+    noteRefresh(trigger, force ? "syncing (forced)" : `syncing, ${Math.round(age / 1000)}s since last`);
 
     // The band takes one central at a time, so a live heart-rate stream blocks
     // a sync outright: the plugin rejects with LINK_BUSY and the sync quietly
@@ -838,6 +959,30 @@ export const useHelioStore = defineStore("helio", () => {
     }
   }
 
+  /**
+   * Move frozen resting heart rates onto the night-scoped definition.
+   *
+   * Resting HR was the last reading the band emitted in the calendar day until
+   * 2026-08-14, which made it a different quantity depending on the hour: the
+   * same morning it read 57 at 09:17 and 52 at 09:28, and just after midnight it
+   * fell back to a waking percentile and read 67 against a real nightly 47.
+   *
+   * **This one overwrites**, unlike the additive backfill above, and it has to:
+   * Recovery judges today against a rolling baseline of the days behind it, so
+   * leaving those on the old definition would compare a sleeping figure with a
+   * fortnight of end-of-day ones. On this archive that is several beats, which
+   * is a whole band of score.
+   */
+  async function rescopeRestingHr() {
+    if (load(RESTING_HR_NIGHT_SCOPE_KEY, false)) return;
+    try {
+      await rescopeRestingHrToNights();
+      persist(RESTING_HR_NIGHT_SCOPE_KEY, true);
+    } catch {
+      // Retried on the next launch.
+    }
+  }
+
   return {
     connected,
     authKey,
@@ -857,6 +1002,10 @@ export const useHelioStore = defineStore("helio", () => {
     alarm,
     alarmSending,
     writeAlarm,
+    exactAlarm,
+    checkExactAlarm,
+    requestExactAlarm,
+    noteRefresh,
     startLiveHeartRate,
     stopLiveHeartRate,
     setAuthKey,

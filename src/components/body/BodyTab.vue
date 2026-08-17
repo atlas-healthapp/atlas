@@ -11,6 +11,11 @@
     </div>
 
     <template v-else>
+      <!-- Above TODAY, because it is the slowest-moving thing on the page and
+           the one the rest of it accumulates into: a recovery score is about
+           last night and this is about the last month of them. -->
+      <FitnessAgeCard :result="fitnessAge" />
+
       <!-- The two scores lead: they are what the rows underneath explain, and
            both already have pages of their own. This is also what makes BODY
            not a duplicate of those pages but the index that reaches them. -->
@@ -133,6 +138,11 @@ import { familyColor } from "@/utils/families";
 import { recoveryColor, recoveryInk } from "@/utils/recovery";
 import { recoveryFor } from "@/components/home/homeModel";
 import { BODY_CARDS } from "./bodyModel";
+import FitnessAgeCard from "./FitnessAgeCard.vue";
+import { fitnessAgeFor } from "./fitnessAgeModel";
+import { getWorkouts } from "@/utils/sampleDb";
+import { useSessionsStore } from "@/stores/sessions";
+import { resolveSessions } from "@/components/activity/resolveSessions";
 import { rowFor, daysWithData } from "@/utils/metricRow";
 import { formatValue } from "@/utils/metricRegistry";
 import HomeCard from "@/components/home/HomeCard.vue";
@@ -181,10 +191,34 @@ function openRow(row) {
 
 const dayWindow = ref([]);
 
+/**
+ * Sessions for the activity index, which is a fitness age input and nothing else
+ * on this tab uses.
+ *
+ * Read through `resolveSessions` rather than raw, the same as ActivityTab and
+ * RecoveryPage: a hand-corrected duration applied in one place and not another
+ * is how two screens end up disagreeing about a week.
+ */
+const rawSessions = ref([]);
+const sessionStore = useSessionsStore();
+const sessions = computed(() => resolveSessions(rawSessions.value, sessionStore));
+
 async function loadWindow() {
   const to = today();
   const from = addDays(to, -(WINDOW_DAYS - 1));
   dayWindow.value = await dailyValuesForRange(from, to);
+  // Not awaited alongside: the fitness age is the slowest thing on the page and
+  // the rows above it should not wait on a second read to draw.
+  getWorkouts(Date.parse(`${addDays(to, -(WINDOW_DAYS - 1))}T00:00:00`), Date.now())
+    .then((found) => {
+      rawSessions.value = found ?? [];
+    })
+    .catch(() => {
+      // A failed read leaves the index unbuilt, which the card reports as
+      // missing activity rather than as a zero. Never a silent zero: that would
+      // read as "you did nothing this month".
+      rawSessions.value = [];
+    });
   // Not awaited with the above: the six-month window is only needed for the
   // condition half of the score, and the tab should draw without waiting on it.
   levels.ensure();
@@ -211,7 +245,7 @@ const todayKey = computed(() => today());
 
 const scroller = ref(null);
 const { pull, refreshing, armed, note } = usePullToRefresh(scroller, async () => {
-  const reason = await helio.refresh({ force: true }).catch(() => null);
+  const reason = await helio.refresh({ force: true, trigger: "pull-body" }).catch(() => null);
   await loadWindow();
   return reason;
 });
@@ -223,6 +257,26 @@ const dayCount = computed(() => daysWithData(dayWindow.value));
 // it had already collected, while the header above it went on counting "10 DAYS
 // OF READINGS". Readings you have are readings you have.
 const hasReadings = computed(() => dayCount.value > 0);
+
+const fitnessAge = computed(() =>
+  fitnessAgeFor({
+    profile: { age: profile.age, sex: profile.sex || null, heightCm: profile.heightCm ?? null },
+    entries: checkin.entries,
+    // **The long window, not this tab's thirty-day one.** The model wants 30
+    // days of resting heart rate and today is deliberately excluded from the
+    // average, so a thirty-day window tops out at 29 and the figure could never
+    // stop being provisional. Caught by screenshotting it with forty days of
+    // history seeded and watching it still say "1 day to go".
+    //
+    // `levels.window` is already loaded for the condition half of Recovery and
+    // runs to several months, so this needs no second read. It falls back to
+    // the short window only while that one is still loading, which shows a
+    // provisional figure for a moment rather than nothing.
+    dayWindow: levels.window.length ? levels.window : dayWindow.value,
+    sessions: sessions.value,
+    todayKey: todayKey.value,
+  })
+);
 
 const recovery = computed(() =>
   recoveryFor({

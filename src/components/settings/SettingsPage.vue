@@ -374,7 +374,13 @@ const appVersion = __APP_VERSION__;
  * settings never waits on a network call, then refreshed in the background.
  */
 const update = shallowRef(cachedUpdate());
-checkForUpdate().then((found) => {
+// **Forced here, unlike on Home.** Home checks at most once every six hours,
+// which is right for something glanced at all day. Settings is the one screen
+// somebody opens *to find out what they are running*, and a six-hour-old "no,
+// nothing newer" is exactly the wrong answer to give them: it happened on the
+// day this shipped, where the app had cached its answer twenty minutes before
+// the release went out and would have said nothing until the evening.
+checkForUpdate({ force: true }).then((found) => {
   update.value = found;
 });
 // Opened on whichever section sent us here, so first run's SET IT UP NOW lands

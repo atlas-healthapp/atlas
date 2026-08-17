@@ -38,6 +38,19 @@ final class SmartAlarm {
     static final String KEY_LATEST_MINUTE = "alarm_latest_minute";
     /** The morning an early wake was last written, so it fires once a night. */
     static final String KEY_FIRED_ON = "alarm_fired_on";
+    /**
+     * When the user's own alarm is owed back on the band, or 0.
+     *
+     * <p><b>Waking you early spends the alarm.</b> Both the early wake and the
+     * onset retime work by overwriting the one slot the app wrote with a
+     * {@code REPEAT_ONCE} alarm a couple of minutes out. That is what makes them
+     * safe to fail - a write that does not land leaves the original time sitting
+     * there - but it also means that once one lands, the recurring alarm the user
+     * set is gone. Nothing put it back until 2026-08-14, so the first smart wake
+     * silently disarmed every following night, and the only way to get it back
+     * was opening Settings and pressing SEND.
+     */
+    static final String KEY_REARM_AFTER = "alarm_rearm_after";
 
     /** Minutes before the set time that the window opens. Matches the JS. */
     static final int WINDOW_MINUTES = 20;
@@ -169,7 +182,52 @@ final class SmartAlarm {
      * session whatsoever, and that is not the same claim as being awake.
      */
     static int currentStage(final List<byte[]> sessions, final long now) {
-        if (sessions == null) return -1;
+        final Reading reading = newestReading(sessions, now);
+        if (reading == null) return -1;
+        if (reading.ageMinutes(now) > MAX_STALE_MINUTES) return -1;
+        return reading.stage;
+    }
+
+    /**
+     * How old the freshest reading is, in minutes, or -1 when there is none.
+     *
+     * <p><b>For the trail, not for the decision.</b> {@link #currentStage}
+     * answers -1 for three different reasons - the band handed over nothing, the
+     * blobs were unreadable, or the newest reading is too old to describe now -
+     * and a morning that did not wake you cannot be explained without knowing
+     * which. This reports the age whatever it is, so a trail line reading
+     * {@code stage=-1 sessions=2 stale=41} says the sync was not fresh enough
+     * rather than that the band was silent.
+     */
+    static long readingAgeMinutes(final List<byte[]> sessions, final long now) {
+        final Reading reading = newestReading(sessions, now);
+        return reading == null ? -1 : reading.ageMinutes(now);
+    }
+
+    /** The newest stage segment at or before a moment, with when it ended. */
+    private static final class Reading {
+        final int stage;
+        final long endMillis;
+
+        Reading(final int stage, final long endMillis) {
+            this.stage = stage;
+            this.endMillis = endMillis;
+        }
+
+        long ageMinutes(final long now) {
+            return (now - endMillis) / 60_000L;
+        }
+    }
+
+    /**
+     * The freshest thing the band has said, with no judgement applied.
+     *
+     * <p>Staleness is deliberately not checked here: this is the measurement and
+     * {@link #currentStage} is the decision. Keeping them apart is what lets the
+     * trail record an age for a reading the decision then rejects.
+     */
+    private static Reading newestReading(final List<byte[]> sessions, final long now) {
+        if (sessions == null) return null;
         int best = -1;
         long bestEnd = Long.MIN_VALUE;
 
@@ -200,13 +258,10 @@ final class SmartAlarm {
             }
             // Referenced so the offset is not silently unused if the layout ever
             // changes; the app's decoder uses it to place the timeline.
-            if (sleepStart < 0) return -1;
+            if (sleepStart < 0) return null;
         }
 
-        if (best < 0) return -1;
-        final long staleMinutes = (now - bestEnd) / 60_000L;
-        if (staleMinutes > MAX_STALE_MINUTES) return -1;
-        return best;
+        return best < 0 ? null : new Reading(best, bestEnd);
     }
 
     /**
@@ -301,5 +356,114 @@ final class SmartAlarm {
     /** Remember that tonight has had its early wake, so it happens once. */
     static void markFired(final SharedPreferences prefs, final long now) {
         prefs.edit().putString(KEY_FIRED_ON, dayKey(now)).apply();
+    }
+
+    // ── putting the user's own alarm back ───────────────────────────────────
+
+    /**
+     * How long after the one-off goes off before the recurring alarm goes back.
+     *
+     * <p>Measured from when the one-off <i>fires</i>, not from when it is
+     * written, and the difference is the whole correctness of this. An early
+     * wake is written two minutes out; an onset retime is written as early as
+     * 02:00 for an alarm at 07:30. Counting from the write would put the
+     * recurring alarm back over the top of a retimed alarm five hours before it
+     * was due to go off, which is the same disarming bug in a new place.
+     *
+     * <p>Fifteen minutes past the buzz, which also clears the ten-minute check
+     * spacing, so the re-arm lands on a later tick rather than racing the fire
+     * inside one.
+     */
+    static final int REARM_DELAY_MINUTES = 15;
+
+    /**
+     * Note that the slot holds a one-off, and when the user's alarm is owed back.
+     *
+     * @param firesAtMillis when the one-off just written will actually go off.
+     */
+    static void markRearmOwed(final SharedPreferences prefs, final long firesAtMillis) {
+        markRearmAt(prefs, firesAtMillis + REARM_DELAY_MINUTES * 60_000L);
+    }
+
+    /** The same debt, at an explicit time. Used to back off after an attempt. */
+    static void markRearmAt(final SharedPreferences prefs, final long whenMillis) {
+        prefs.edit().putLong(KEY_REARM_AFTER, whenMillis).apply();
+    }
+
+    /** Forget the debt, whether it was paid or has stopped applying. */
+    static void clearRearm(final SharedPreferences prefs) {
+        prefs.edit().remove(KEY_REARM_AFTER).apply();
+    }
+
+    /**
+     * Is the user's alarm owed back, and is it time?
+     *
+     * <p>Only ever true when the alarm is still enabled. Somebody who turned the
+     * alarm off between the buzz and this tick is not owed one, and re-arming
+     * anyway would set an alarm they had just cancelled - the one outcome worse
+     * than the bug this fixes.
+     */
+    static boolean rearmDue(final SharedPreferences prefs, final long now) {
+        final long after = prefs.getLong(KEY_REARM_AFTER, 0L);
+        if (after <= 0L) return false;
+        if (!prefs.getBoolean(KEY_ENABLED, false)) return false;
+        return now >= after;
+    }
+
+    /**
+     * The hour to put back on the band, mirroring what the app itself writes.
+     *
+     * <p>An onset alarm hands the band the <i>latest</i> time the user was
+     * willing to accept rather than the computed one, because the strap is
+     * holding a backstop rather than the answer. Getting this wrong would put a
+     * fixed alarm at the onset cap or vice versa, so it is one function rather
+     * than the same conditional in two places. See {@code writeAlarm} in
+     * {@code stores/helio.js}, which this has to agree with.
+     */
+    static int hardHour(final SharedPreferences prefs) {
+        final int latest = prefs.getInt(KEY_LATEST_HOUR, -1);
+        if ("onset".equals(prefs.getString(KEY_MODE, "fixed")) && latest >= 0) return latest;
+        return prefs.getInt(KEY_HOUR, -1);
+    }
+
+    /** The minute that goes with {@link #hardHour}. */
+    static int hardMinute(final SharedPreferences prefs) {
+        final int latest = prefs.getInt(KEY_LATEST_HOUR, -1);
+        if ("onset".equals(prefs.getString(KEY_MODE, "fixed")) && latest >= 0) {
+            return prefs.getInt(KEY_LATEST_MINUTE, 0);
+        }
+        return prefs.getInt(KEY_MINUTE, 0);
+    }
+
+    /**
+     * The band's repeat byte for a stored day list.
+     *
+     * <p><b>Two week conventions meet here and neither fails loudly.</b> Atlas
+     * counts days the way {@code Date.getDay()} does, Sunday as 0, which is what
+     * the app mirrors into {@link #KEY_DAYS}. The band counts from Monday as the
+     * low bit. Getting it wrong sets the alarm one day out and the first evidence
+     * is a Sunday it should not have gone off on, which is why this mirrors
+     * {@code repeatMask} in {@code src/utils/strapAlarm.js} exactly and has its
+     * own test.
+     *
+     * <p>An empty list is a one-off, the same reading the app gives it.
+     */
+    static int repeatMask(final String days) {
+        if (days == null || days.trim().isEmpty()) return HelioAlarm.REPEAT_ONCE;
+        final int[] mondayFirst = {1, 2, 3, 4, 5, 6, 0};
+        int mask = 0;
+        for (final String part : days.split(",")) {
+            final int day;
+            try {
+                day = Integer.parseInt(part.trim());
+            } catch (final NumberFormatException ignored) {
+                // A malformed entry is dropped rather than shifting the rest.
+                continue;
+            }
+            for (int bit = 0; bit < mondayFirst.length; bit++) {
+                if (mondayFirst[bit] == day) mask |= 1 << bit;
+            }
+        }
+        return mask;
     }
 }

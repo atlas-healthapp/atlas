@@ -154,7 +154,36 @@ export function recentSleepScore({ entries, todayKey, nights = SLEEP_TERM_NIGHTS
  * Sleep comes off the checkin entry rather than the sample rollups, because
  * that is where SP1a deliberately left it so Home and Trends kept working.
  */
-export function recoveryFor({
+/**
+ * Recovery for a date, falling back to the last night that was actually scored.
+ *
+ * **The fallback lives here rather than in each screen**, for the reason the
+ * whole file exists: Home's dial, the TODAY card and RecoveryPage would
+ * otherwise each decide separately what to show between midnight and waking, and
+ * that is how two screens end up disagreeing about one number.
+ *
+ * It only ever steps back one day. Two days without a night is the strap not
+ * being worn, which is genuinely no reading rather than a night still to come,
+ * and answering it with a score from the day before yesterday would be stale
+ * enough to mislead.
+ */
+export function recoveryFor(args) {
+  const result = recoveryOn(args);
+  if (result.state !== "awaiting-night") return { ...result, forDate: args.todayKey };
+
+  const previous = addDays(args.todayKey, -1);
+  const back = recoveryOn({
+    ...args,
+    todayKey: previous,
+    entry: (args.entries ?? []).find((e) => e.date === previous) ?? null,
+  });
+  // Only a real score is worth stepping back for. Anything else and the honest
+  // answer is the one this date already gave.
+  if (back.state !== "ready") return { ...result, forDate: args.todayKey };
+  return { ...back, forDate: previous, fromPreviousNight: true };
+}
+
+function recoveryOn({
   dayWindow,
   entry,
   todayKey,

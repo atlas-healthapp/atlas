@@ -298,11 +298,62 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
     /**
      * Opens a link that writes one alarm and nothing else.
      *
+     * <p><b>Only when there is no link already.</b> {@link #connect} refuses
+     * outright when a GATT is open, so calling this on a live link sets
+     * {@code pendingAlarm} and then returns having sent nothing - see
+     * {@link #writeAlarmNow}, which is what a caller holding a link must use.
+     *
      * @param alarm a message from {@link HelioAlarm#create}, already validated.
      */
     public void connectForAlarm(final byte[] alarm) {
         this.pendingAlarm = alarm;
         connect(0, false, 0L);
+    }
+
+    /**
+     * Write an alarm over a link that is already open and authenticated.
+     *
+     * <p><b>This exists because the background service could never write one at
+     * all, and the failure was silent.</b> Its early wake, its onset retime and
+     * its re-arm all ran from {@code finish()}, which is called on
+     * {@code onFetchComplete} while the sync's own GATT is still open. Each one
+     * called {@link #connectForAlarm}, which hands the payload to
+     * {@link #connect}, which begins "if the GATT is not null, log and return" -
+     * so the alarm was parked in {@code pendingAlarm} and thrown away by the
+     * {@code link.disconnect()} twenty lines further down the same method.
+     * Measured on 2026-08-14: the service correctly found light sleep at 08:25,
+     * logged FIRING at 08:27, and the strap went off at 08:45 on the alarm it
+     * had been holding all along.
+     *
+     * <p>Writing over the open link is better than deferring to a new one and
+     * not merely easier. The band takes one central at a time, so a second
+     * connect has to wait for this one to close; it costs another handshake and
+     * several seconds of radio at the exact moment the alarm is meant to be
+     * two minutes out. This link is already authenticated and has already read
+     * the endpoint inventory, so the write is one message.
+     *
+     * @return false when there is no usable link, in which case the caller
+     *     should fall back to {@link #connectForAlarm}. Never throws: an alarm
+     *     failing to send must not take the sync down with it.
+     */
+    public boolean writeAlarmNow(final byte[] alarm) {
+        if (gatt == null || alarm == null) return false;
+        // The same check the post-auth path makes. An endpoint this firmware
+        // does not list would take the write and drop it, and the caller would
+        // be told an alarm was set that was not.
+        if (!endpointEncrypted.containsKey((int) HelioAlarm.ENDPOINT)) {
+            log("! this firmware does not list the alarm endpoint");
+            listener.onAlarmSet(false, -1);
+            return true;
+        }
+        try {
+            log("setting alarm on the open link…");
+            sendToService(HelioAlarm.ENDPOINT, alarm);
+            return true;
+        } catch (final Exception e) {
+            log("! alarm write failed on the open link: " + e);
+            return false;
+        }
     }
 
     /**
@@ -316,6 +367,20 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
         this.liveHeartRate = live;
         if (gatt != null) {
             log("already connected, ignoring");
+            // **Refusals have to be reported, and this was the one that was not.**
+            // The branch below already answers `onClosed("link busy")`; this one
+            // returned in silence, so a caller that had just handed over an
+            // alarm was told nothing and carried on believing it was sent. That
+            // is exactly how the background service spent three weeks writing
+            // alarms that never left the phone. Whoever asked for something is
+            // told it did not happen, and the pending payload is dropped here
+            // rather than left to be picked up by an unrelated later connect.
+            if (pendingAlarm != null) {
+                pendingAlarm = null;
+                listener.onAlarmSet(false, -1);
+            } else {
+                listener.onClosed("already connected");
+            }
             return;
         }
         // The advisory isLinkActive() check happens in each caller before this

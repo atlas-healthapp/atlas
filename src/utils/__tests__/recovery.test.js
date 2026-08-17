@@ -273,6 +273,34 @@ describe("computeRecovery", () => {
     expect(result.score).toBeNull();
   });
 
+  it("refuses to score a date whose night has not happened yet", () => {
+    // The real case, measured on the phone at 00:32 on 2026-08-14. The date had
+    // rolled over half an hour earlier, so it had no sleep and no HRV, both
+    // terms were withheld, and their weight landed on a resting heart rate of
+    // 67 - the tenth percentile of half an hour of sitting up awake, against a
+    // baseline near 47. That returned a real-looking 38 for a night nobody had
+    // had yet.
+    const result = ready({ restingHr: 67, hrv: null, sleep: null });
+    expect(result.state).toBe("awaiting-night");
+    expect(result.score).toBeNull();
+  });
+
+  it("still scores a finished day that is only missing its HRV", () => {
+    // The distinction the gate turns on. A day with sleep behind it is a day
+    // that can be scored, and withholding HRV and redistributing its weight is
+    // the right answer there - it is only wrong before the night has happened.
+    const result = ready({ restingHr: 48, hrv: null, sleep: 7.5 });
+    expect(result.state).toBe("ready");
+    expect(result.score).toBeGreaterThan(0);
+  });
+
+  it("keeps saying no-data when the strap was not worn at all", () => {
+    // Narrower than the gate above on purpose: nothing recorded is a strap left
+    // in a drawer, which is true at any hour and must keep saying so rather than
+    // being explained away as a night still to come.
+    expect(ready({ restingHr: null, hrv: null, sleep: null }).state).toBe("no-data");
+  });
+
   it("keeps the component terms so a surprising score can be explained", () => {
     const result = ready({ hrv: 52, restingHr: 54, sleep: 8 });
     expect(result.terms.hrv).not.toBeNull();

@@ -4,6 +4,7 @@
 import { BODY_METRICS, rollupFor, restingHrFor } from "@/utils/bodyMetrics";
 import { getSamples, loadRollups, saveRollups } from "@/utils/sampleDb";
 import { addDays, today } from "@/utils/date";
+import { load } from "@/utils/storage";
 
 // Every key a caller can ever expect back from dailyValuesFor: every metric
 // with a real rollup, which since 2026-08-06 includes raw `hr` - it was only
@@ -25,6 +26,29 @@ export function localDayBounds(dateKey) {
   return { start: startDate.getTime(), end: endDate.getTime() };
 }
 
+/**
+ * The night that ended on this date, as epoch bounds, or null if none is known.
+ *
+ * **Read straight out of the persisted check-ins rather than passed in.** The
+ * alternative is threading a window through `dailyValuesFor`,
+ * `dailyValuesForRange` and `rollupsForDate` and then through all seventeen
+ * callers of those, most of which have no idea a sleep window exists. This
+ * reads one localStorage key through the same guarded `load` the stores use, so
+ * it degrades to null under test and in node rather than throwing.
+ *
+ * Nights are stored on the date they END, which is the same key this file rolls
+ * up, so no date arithmetic is needed. `bedTime`/`wakeTime` are epoch ms - see
+ * the note in `sampleIngest.commitSleepSessions` about why they are not Dates.
+ */
+export function sleepWindowFor(dateKey) {
+  const entries = load("atlas_checkins", []) ?? [];
+  const stages = entries.find((e) => e?.date === dateKey)?.sleepStages;
+  const start = stages?.bedTime;
+  const end = stages?.wakeTime;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  return { start, end };
+}
+
 export async function rollupsForDate(dateKey) {
   const { start, end } = localDayBounds(dateKey);
   const out = {};
@@ -40,8 +64,36 @@ export async function rollupsForDate(dateKey) {
     );
   }
 
-  const deviceResting = out.restingHr ?? null;
-  const hrSamples = await getSamples("hr", start, end);
+  // **Resting heart rate is the night's, not the calendar day's** (2026-08-14).
+  //
+  // It was the last resting sample the band emitted between midnight and
+  // midnight, which is a different quantity depending on when you looked. Read
+  // off the phone that morning: the band emitted 04:46=57, 05:16=55, 05:36=53
+  // and then 09:26=52, the last of those forty minutes after waking. So Recovery
+  // scored 57 at 09:17 and 52 at 09:28, and the score moved four points on a
+  // refresh that collected nothing new about the night. Worse at the other end:
+  // just after midnight there are no resting samples yet at all, so it fell
+  // through to the tenth percentile of that date's handful of waking heart
+  // rates and returned 67 against a real nightly figure near 47.
+  //
+  // Scoped to the night, the figure is settled by the time you wake and cannot
+  // drift for the rest of the day. **The aggregation inside the window is
+  // deliberately unchanged** - still the last device reading, still the tenth
+  // percentile as a fallback - because which reading best represents a night is
+  // a separate question from which readings belong to it, and only the second
+  // one was wrong.
+  //
+  // Falls back to the whole day when the night is not known: nights before
+  // 2026-08-04 have no stored bedtime, and today has none until you have slept.
+  const night = sleepWindowFor(dateKey);
+  const restFrom = night ?? { start, end };
+  const deviceResting = night
+    ? rollupFor(
+        BODY_METRICS.restingHr.rollup,
+        (await getSamples("restingHr", night.start, night.end)).map((s) => s.v)
+      )
+    : (out.restingHr ?? null);
+  const hrSamples = await getSamples("hr", restFrom.start, restFrom.end);
   out.restingHr = restingHrFor(
     deviceResting,
     hrSamples.map((s) => s.v)
@@ -129,6 +181,65 @@ export async function backfillRollupKeys(metrics, { days = 90 } = {}) {
   }
 
   return filled;
+}
+
+/**
+ * Rewrite frozen resting heart rates onto the night-scoped definition.
+ *
+ * **This one overwrites, which `backfillRollupKeys` deliberately refuses to
+ * do**, and the difference is worth stating. That function fills a metric that
+ * was never computed, so adding is all it can do. This one changes a value that
+ * exists, because the definition behind it changed on 2026-08-14: resting heart
+ * rate is now the night's reading rather than the calendar day's.
+ *
+ * Without it the two definitions would sit side by side in one series. Recovery
+ * scores today against a rolling baseline of the days before it, so today would
+ * be a sleeping figure judged against a fortnight of end-of-day ones - and on
+ * this archive that gap is several beats, which is several points of score and
+ * a full band. A migration that leaves a metric meaning two things is worse
+ * than no migration.
+ *
+ * **Only days whose night is known are touched.** A date with no stored bedtime
+ * has no window to scope to, so its value is already the whole-day one and
+ * rewriting it would change nothing. Ninety days by default: raw samples are
+ * full resolution inside the retention window and collapsed to 15-minute
+ * averages past it, and every baseline in the app is far shorter than that.
+ *
+ * Returns how many days it rewrote.
+ */
+export async function rescopeRestingHrToNights({ days = 90 } = {}) {
+  let changed = 0;
+  const todayKey = today();
+
+  for (let i = 1; i <= days; i++) {
+    const dateKey = addDays(todayKey, -i);
+    const stored = await loadRollups(dateKey);
+    // No frozen rollup means the read path recomputes that day from samples and
+    // already applies the new scoping.
+    if (!stored) continue;
+
+    const night = sleepWindowFor(dateKey);
+    if (!night) continue;
+
+    const deviceSamples = await getSamples("restingHr", night.start, night.end);
+    const hrSamples = await getSamples("hr", night.start, night.end);
+    const rescoped = restingHrFor(
+      rollupFor(
+        BODY_METRICS.restingHr.rollup,
+        deviceSamples.map((s) => s.v)
+      ),
+      hrSamples.map((s) => s.v)
+    );
+    // Nothing in the window is not a correction, it is a loss. A night whose
+    // samples have aged out must keep the figure it already had.
+    if (rescoped == null) continue;
+    if (stored.restingHr === rescoped) continue;
+
+    await saveRollups(dateKey, { ...stored, restingHr: rescoped });
+    changed++;
+  }
+
+  return changed;
 }
 
 // Windowed read for screens that show a run of days. Each dailyValuesFor call
