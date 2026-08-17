@@ -96,8 +96,25 @@ final class SmartAlarm {
      */
     static boolean watching(final SharedPreferences prefs) {
         if (!prefs.getBoolean(KEY_ENABLED, false)) return false;
-        final String mode = prefs.getString(KEY_MODE, "fixed");
-        return "smart".equals(mode) || "onset".equals(mode);
+        // **Smart only, and onset used to be here.** The three modes are offered
+        // as alternatives and only one of them mentions light sleep, so only one
+        // of them does it. Onset asks for a duration - "eight hours from when I
+        // fell asleep" - and spending twenty minutes of that duration to land in
+        // a light phase was never what was offered.
+        //
+        // It cost somebody forty minutes on 2026-08-16: nothing in the firing
+        // path re-checked the mode, so an onset night ran the early wake too, and
+        // the window was built from KEY_HOUR (a leftover 08:45 from fixed mode)
+        // while the strap held 09:07. Fired at 08:27, from a feature promising
+        // twenty minutes early, in a mode that never claimed to do it at all.
+        //
+        // This also disposes of that wrong-anchor bug rather than fixing it:
+        // millisUntilAlarm reads KEY_HOUR, which is right for smart (where
+        // hardHour returns the same field) and was only ever wrong for onset,
+        // which no longer has a window to anchor. onsetTarget keeps its own mode
+        // check and never called this, so the retime is untouched - see
+        // SmartAlarmModeTest.theRetimeHasItsOwnModeGate.
+        return "smart".equals(prefs.getString(KEY_MODE, "fixed"));
     }
 
     /** Milliseconds until the set time today, or a large number when it has passed. */
