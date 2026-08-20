@@ -14,6 +14,31 @@ function toNumber(v) {
   return Number.isNaN(n) ? null : n;
 }
 
+/**
+ * A macro at the resolution Atlas actually keeps it at.
+ *
+ * **The store rounds every macro to a whole number on every read** - see
+ * `resolvedMacros` in `stores/food.js`, whose own note says grams and kcal are
+ * never usefully fractional. So a scan handing the form `155.40000000000003`
+ * shows a number that will not survive being saved, and the user reads a
+ * precision the app does not keep. Open Food Facts computes its per-serving
+ * fields from a per-100g basis, so those tails are the common case rather than
+ * the odd one: a tin of baked beans arrived with five of them.
+ *
+ * Rounded here, at the boundary, rather than in the form: every route out of a
+ * scan (the single-scan form, the batch sheet's preview, the match comparison in
+ * `batchMeal.macrosMatch`) reads these same fields, and rounding in one of them
+ * is how the three end up disagreeing. Same reasoning `batchMeal.js` gives for
+ * rounding its preview where the store will.
+ *
+ * **This cannot change a stored value.** Everything downstream already rounded;
+ * all that changes is that the figure on screen now matches the figure kept.
+ */
+function toMacro(v) {
+  const n = toNumber(v);
+  return n == null ? null : Math.round(n);
+}
+
 // product_name alone is often generic ("Soft White" for a pack of wraps) -
 // OFF usually has the actual brand separately, so prefix it when the name
 // doesn't already include it. It also often omits what the product actually
@@ -81,16 +106,16 @@ export async function lookupBarcode(code) {
 
     return {
       name: buildName(product),
-      protein: toNumber(nutriments[`proteins${suffix}`]),
-      kcal: toNumber(nutriments[`energy-kcal${suffix}`]),
-      carbs: toNumber(nutriments[`carbohydrates${suffix}`]),
-      fat: toNumber(nutriments[`fat${suffix}`]),
+      protein: toMacro(nutriments[`proteins${suffix}`]),
+      kcal: toMacro(nutriments[`energy-kcal${suffix}`]),
+      carbs: toMacro(nutriments[`carbohydrates${suffix}`]),
+      fat: toMacro(nutriments[`fat${suffix}`]),
       // Fibre is commonly omitted from OFF entirely for products that
       // genuinely have ~0g (meat, dairy) rather than encoded as 0 - unlike
       // protein/kcal/carbs/fat, a missing value here is far more often
       // "none" than "unmeasured", so default it to 0 instead of leaving a
       // blank the user has to fill in by hand on every such scan.
-      fibre: toNumber(nutriments[`fiber${suffix}`]) ?? 0,
+      fibre: toMacro(nutriments[`fiber${suffix}`]) ?? 0,
       servingBasis: hasServingData ? "serving" : "100g",
       // Descriptive serving text OFF sometimes provides (e.g. "2 pieces
       // (70g)") - separate field from the _serving-suffixed macro numbers

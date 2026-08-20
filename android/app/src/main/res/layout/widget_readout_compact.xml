@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The short form: one row, no bars, no header.
+
+     Chosen when the cell is under roughly two rows tall. The full layout was the
+     only one, with a fixed 110dp minimum, so the widget could not be made
+     shorter and stretched to leave dead space under its content when it was.
+
+     A bar needs a label and a track to mean anything, and neither fits here, so
+     the figures carry their own words instead. Same order as the full layout and
+     as Home's dial row, because a strip read by position is learned in a week
+     and only stays learned if the order never moves. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:baselineAligned="false"
+    android:background="@drawable/widget_bg"
+    android:paddingStart="14dp"
+    android:paddingEnd="6dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:baselineAligned="true">
+        <TextView
+            android:id="@+id/val_recovery"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="17sp"
+            android:maxLines="1"
+            android:textColor="@color/widget_ink" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:fontFamily="monospace"
+            android:textSize="8sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:textColor="@color/widget_recovery"
+            android:text="RCV" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:baselineAligned="true">
+        <TextView
+            android:id="@+id/val_steps"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="17sp"
+            android:maxLines="1"
+            android:textColor="@color/widget_ink" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:fontFamily="monospace"
+            android:textSize="8sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:textColor="@color/widget_activity"
+            android:text="STEPS" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:baselineAligned="true">
+        <TextView
+            android:id="@+id/val_sleep"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="17sp"
+            android:maxLines="1"
+            android:textColor="@color/widget_ink" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:fontFamily="monospace"
+            android:textSize="8sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:textColor="@color/widget_body"
+            android:text="SLP" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/widget_refresh"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:padding="8dp"
+        android:src="@drawable/ic_widget_refresh"
+        android:contentDescription="@string/widget_refresh" />
+</LinearLayout>

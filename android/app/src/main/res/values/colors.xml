@@ -31,6 +31,13 @@
     <color name="notif_activity_track">#3d0f766e</color>
     <color name="notif_recovery_track">#3da16207</color>
 
+    <!-- **A slot that can hold any metric cannot carry that metric's colour.**
+         A ProgressBar's tint is not remotable before API 31 and Atlas supports
+         26, so the three dial rows share one neutral pair and the label does the
+         identifying. -->
+    <color name="notif_accent">#4b5563</color>
+    <color name="notif_accent_track">#3d4b5563</color>
+
     <color name="notif_hairline">#22000000</color>
 
     <!-- Text, and it must NOT be ?android:attr/textColorPrimary. Inside a
@@ -40,4 +47,75 @@
          per file, is the only version that cannot resolve to the wrong thing. -->
     <color name="notif_ink">#1b1b1f</color>
     <color name="notif_dim">#5a5f66</color>
+
+    <!-- The widget's own palette. Unlike the notif_ set above there is no
+         values-night counterpart, and that is the point: a widget sits on the
+         wallpaper with no theme to inherit, so it paints a surface and controls
+         its own contrast. Values are Sentinel's, from src/style.css. Following
+         the app's chosen theme is possible via atlas_theme_native and is a
+         follow-up, not a first cut. -->
+    <color name="widget_panel">#0a1622</color>
+    <color name="widget_ink">#eaf9ff</color>
+    <color name="widget_dim">#74bdd8</color>
+    <color name="widget_line">#2f4a5a</color>
+    <color name="widget_recovery">#f5c451</color>
+    <color name="widget_recovery_track">#3df5c451</color>
+    <color name="widget_activity">#2dd4bf</color>
+    <color name="widget_activity_track">#3d2dd4bf</color>
+    <color name="widget_body">#d8b4fe</color>
+    <color name="widget_intake">#5b9df8</color>
+    <color name="widget_intake_track">#3d5b9df8</color>
+    <!-- Recovery's bands, since a dial for it is coloured by where the score
+         landed rather than by a family. Same values as the app's own recovery band tokens. -->
+    <color name="widget_rec_great">#b9ffcf</color>
+    <color name="widget_rec_good">#4ade80</color>
+    <color name="widget_rec_normal">#fbbf24</color>
+    <color name="widget_rec_low">#f87171</color>
+    <color name="widget_body_track">#3dd8b4fe</color>
+
+    <!-- The four sleep stages, and this is the one place a widget uses more
+         than one hue for one subject. The licence for it is the same one the
+         sleep page has: inside a single subject there is no second family to
+         confuse it with, so hue is free to carry structure. Strength tracks
+         REM stays violet so the bar still reads as descended from BODY, and
+         AWAKE is the only warm one so disruption reads as disruption without
+         using red. Values are Sentinel's own stage tokens from src/style.css,
+         not new ones: the widget and the sleep page draw the same night. -->
+    <color name="widget_stage_deep">#6366f1</color>
+    <color name="widget_stage_light">#38bdf8</color>
+    <color name="widget_stage_rem">#e9d5ff</color>
+    <color name="widget_stage_awake">#fb923c</color>
+
+    <!-- **The widget's LIGHT palette**, for the two light themes.
+
+         Java picks between this and the dark set above by reading
+         `atlas_theme_native`, which the theme store already mirrors into
+         SharedPreferences for MainActivity's launch background. It cannot be a
+         values-night/ qualifier: that follows the *system* night mode, and a
+         widget sits on the wallpaper rather than in the shade - on a dark
+         wallpaper under a light system it would come out the wrong way round.
+
+         Values are Paper and Mission's own tokens from src/style.css, which are
+         the measured ones: the light families are spaced in luminance as well
+         as hue, because hue is what colour blindness removes. Do not tidy. -->
+    <color name="widget_panel_light">#fdfaf2</color>
+    <color name="widget_ink_light">#2a2119</color>
+    <color name="widget_dim_light">#63512f</color>
+    <color name="widget_line_light">#c9b48a</color>
+    <color name="widget_recovery_light">#a16207</color>
+    <color name="widget_activity_light">#0f766e</color>
+    <color name="widget_body_light">#7c3aed</color>
+    <color name="widget_intake_light">#1e3a8a</color>
+    <color name="widget_activity_track_light">#3d0f766e</color>
+    <color name="widget_body_track_light">#3d7c3aed</color>
+    <color name="widget_intake_track_light">#3d1e3a8a</color>
+    <color name="widget_recovery_track_light">#3da16207</color>
+    <color name="widget_rec_great_light">#065f46</color>
+    <color name="widget_rec_good_light">#15803d</color>
+    <color name="widget_rec_normal_light">#a16207</color>
+    <color name="widget_rec_low_light">#be123c</color>
+    <color name="widget_stage_deep_light">#312e81</color>
+    <color name="widget_stage_light_light">#0e7490</color>
+    <color name="widget_stage_rem_light">#8b5cf6</color>
+    <color name="widget_stage_awake_light">#c2410c</color>
 </resources>

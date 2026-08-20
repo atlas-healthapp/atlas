@@ -1,5 +1,6 @@
 package io.github.atlashealthapp.atlas;
 
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -41,5 +42,41 @@ public class MainActivity extends BridgeActivity {
         SharedPreferences prefs = getSharedPreferences("CapacitorStorage", MODE_PRIVATE);
         String theme = prefs.getString("atlas_theme_native", "sentinel");
         getBridge().getWebView().setBackgroundColor(Color.parseColor(bg1For(theme)));
+        recordOpenTarget(getIntent());
+    }
+
+    /**
+     * A warm start, which is what most widget taps are.
+     *
+     * <p>onCreate runs once; tapping a widget while Atlas is already in memory
+     * delivers here instead, and without this the app would come to the front on
+     * whatever tab it was left on - which is the behaviour the target exists to
+     * replace.
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        recordOpenTarget(intent);
+    }
+
+    /**
+     * Which page the widget that was tapped is about.
+     *
+     * <p><b>Left in SharedPreferences rather than handed over directly</b>,
+     * because the WebView may not exist yet on a cold start and a bridge call
+     * into a page that has not loaded goes nowhere. The app reads it when it is
+     * ready and clears it, exactly as it reads the theme from this same group.
+     *
+     * <p>Written even when null so a plain launch clears a target left over from
+     * a tap that was never acted on - otherwise opening Atlas from its icon a
+     * day later would still land on somebody's heart page.
+     */
+    private void recordOpenTarget(Intent intent) {
+        String target = intent == null ? null : intent.getStringExtra("atlas_open");
+        getSharedPreferences("CapacitorStorage", MODE_PRIVATE)
+                .edit()
+                .putString("atlas_widget_open", target == null ? "" : target)
+                .apply();
     }
 }

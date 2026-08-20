@@ -48,17 +48,19 @@
       </div>
       <div v-if="basisLabel" class="dim-text mono note">{{ basisLabel }}</div>
       <div v-if="trendLabel" class="dim-text mono note">{{ trendLabel }}</div>
-      <div v-if="currentLabel" class="dim-text mono note">{{ currentLabel }}</div>
-      <div class="row">
-        <span class="k mono">BACKGROUND</span>
-        <span class="v">EVERY 30 MIN</span>
-      </div>
-      <!-- The open question this ticket was raised to answer. Reported as
-           percent per sync rather than as a share of the drain, because a single
-           interval gives one number with nothing to compare it against: it
-           becomes evidence the moment the interval changes, and until then it
-           says what it measured rather than implying a cause. -->
-      <div v-if="perSyncLabel" class="dim-text mono note">{{ perSyncLabel }}</div>
+      <!-- **One line about the charge, not two.** "On this charge 4.3 days, now
+           at 28%" sat above this and said the same thing from the other end,
+           so the block reported one run twice and the reader had to work out
+           that they were the same charge. -->
+      <div v-if="lastChargedLabel" class="dim-text mono note">{{ lastChargedLabel }}</div>
+
+      <!-- **BACKGROUND · EVERY 30 MIN came off on 2026-08-20.** It was the one
+           row here that stated a constant rather than a reading, and a fixed
+           number is exactly what it is not: the interval already shortens for the
+           sleep probe and for the smart alarm's window, so the row was reporting
+           something that had stopped being true. Nothing acts on it either - it
+           is not a setting, and there is no control anywhere to change it - so it
+           said a number at somebody who could do nothing with it. -->
 
       <div v-if="failing" class="dim-text mono err">
         {{ helio.lastSyncError.toUpperCase() }}
@@ -118,7 +120,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useHelioStore } from "@/stores/helio";
 import { getSamples } from "@/utils/sampleDb";
-import { batteryLife, drainPerSync, formatDays, lifeBand } from "@/utils/strapHealth";
+import { batteryLife, formatDays, lifeBand } from "@/utils/strapHealth";
 import SettingsSection from "./SettingsSection.vue";
 import StrapConnect from "./StrapConnect.vue";
 
@@ -293,16 +295,30 @@ const bandStyle = computed(() =>
 const basisLabel = computed(() => {
   const out = life.value;
   if (out.state === "provisional") {
+    // **"Discharge" for the measurement, "charge" for the event.** This said
+    // "FROM ONE CHARGE. SETTLES AFTER THE NEXT ONE." under a headline reading
+    // "~11.1 DAYS", and the word was doing two jobs at once: the headline means
+    // one charge LASTS eleven days, the sub-line meant the figure was measured
+    // FROM one charge. Reported as a very confusing sentence, which it was.
+    //
+    // "Run" was the first replacement and it is worse, not better: it is this
+    // file's own jargon for a discharge segment and means nothing to a reader.
     return out.fromCurrentRun
-      ? "AT THE RATE OF THIS CHARGE SO FAR. SETTLES AFTER THE NEXT ONE."
-      : "FROM ONE CHARGE. SETTLES AFTER THE NEXT ONE.";
+      ? "EARLY ESTIMATE, FROM A DISCHARGE THAT IS STILL GOING."
+      : "EARLY ESTIMATE, FROM ONE DISCHARGE.";
   }
   if (out.state === "calibrating") {
     return batteryReadings.value.length
       ? "NOT ENOUGH OF A DISCHARGE TO MEASURE YET. IT NEEDS 15% OVER SIX HOURS."
       : "NO BATTERY HISTORY YET. IT IS RECORDED ON EVERY SYNC.";
   }
-  return `MEASURED ACROSS ${out.usable} CHARGES.`;
+  // **How much discharge, not just how many charges.** "Measured across 2
+  // charges" sounds settled while saying nothing about the evidence, and the
+  // figure is an extrapolation to a full 100%: two runs of 16% each is a very
+  // different claim from two of 70%. Reported as too high against the vendor's
+  // 10 days, and the honest answer is to show what it is built on rather than
+  // to quietly tune the number.
+  return `MEASURED ACROSS ${out.usable} CHARGES, ${Math.round(out.basisDrop)}% OF DISCHARGE.`;
 });
 
 const trendLabel = computed(() => {
@@ -315,17 +331,33 @@ const trendLabel = computed(() => {
   return `${way} ${formatDays(trend.previous)} BEFORE THAT.`;
 });
 
-const currentLabel = computed(() => {
-  const run = life.value?.current;
-  if (!run || run.hours < 1) return "";
-  const days = (run.hours / 24).toFixed(1);
-  return `ON THIS CHARGE ${days} DAYS, NOW AT ${Math.round(run.toPct)}%.`;
-});
+// `currentLabel` was here: "ON THIS CHARGE 4.3 DAYS, NOW AT 28%". Removed
+// 2026-08-18 as a second telling of the run that `lastChargedLabel` already
+// describes - one from its start, one from its end - which made the block
+// report a single charge twice.
 
-const perSyncLabel = computed(() => {
-  const per = drainPerSync(batteryReadings.value, chargeTimes.value, 30);
-  if (per == null) return "";
-  return `ABOUT ${per.toFixed(2)}% PER SYNC, MEASURED.`;
+/**
+ * When it was last charged, and how full it got.
+ *
+ * **Replaces a per-sync drain figure**, which was measured honestly and still
+ * told you nothing you could act on: 0.1% a sync is inside the noise of a
+ * percentage that moves in whole points, and nobody decides anything from it.
+ * When the strap last came off the cable, and how full it got, is a fact you can
+ * check against your own memory - which is what makes it worth a line.
+ *
+ * Read off the run in progress: its start IS the charge that began it.
+ */
+const lastChargedLabel = computed(() => {
+  const run = life.value?.current;
+  if (!run) return "";
+  const days = (Date.now() - run.from) / (24 * 60 * 60 * 1000);
+  if (!Number.isFinite(days) || days < 0) return "";
+  // Hours under a day: "0.2 DAYS AGO" is a worse way of saying five hours.
+  const when =
+    days < 1
+      ? `${Math.max(1, Math.round(days * 24))}H AGO`
+      : `${days.toFixed(1)} DAYS AGO`;
+  return `LAST CHARGED ${when}, TO ${Math.round(run.fromPct)}%.`;
 });
 
 // Opening the section is what asks for the figure; a sync that just finished is

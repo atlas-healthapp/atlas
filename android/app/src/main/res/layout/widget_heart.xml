@@ -1,0 +1,293 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Heart at 4x2: the reading now, the resting figure beside it, and the day's
+     line behind them.
+
+     Header follows the set's rule: the metric where the eye starts, the control
+     in the corner a thumb reaches, and no negative margins - those pulled the
+     refresh target outside its parent row on the first widget and swallowed
+     every press. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/heart_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <TextView
+            android:id="@+id/heart_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_heart_label" />
+
+        <!-- A spacer, weighted, because the wordmark has to sit BETWEEN the
+             metric and the stamp rather than beside the metric - set flush
+             against a word, the mark is read as a letter of it. TextView rather
+             than Space: a plain View is not on the RemoteViews whitelist, which
+             the notification learned by being killed for it. -->
+        <TextView
+            android:id="@+id/heart_gap_a"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no" />
+
+        <!-- **The wordmark appears when there is room and goes when there is
+             not.** Three slots need three slots' worth of width; below that the
+             wordmark is the first thing to go, then the stamp, and the metric
+             and the refresh are what a narrow widget keeps. -->
+        <TextView
+            android:id="@+id/heart_mark"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_wordmark"
+            android:visibility="gone" />
+
+        <!-- A spacer, weighted, because the wordmark has to sit BETWEEN the
+             metric and the stamp rather than beside the metric - set flush
+             against a word, the mark is read as a letter of it. TextView rather
+             than Space: a plain View is not on the RemoteViews whitelist, which
+             the notification learned by being killed for it. -->
+        <TextView
+            android:id="@+id/heart_gap_b"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no" />
+
+        <ImageView
+            android:id="@+id/heart_refresh"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:padding="8dp"
+            android:src="@drawable/ic_widget_refresh"
+            android:contentDescription="@string/widget_refresh" />
+
+        <ProgressBar
+            android:id="@+id/heart_spinner"
+            style="?android:attr/progressBarStyleSmall"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:padding="8dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/widget_body"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="true">
+
+        <TextView
+            android:id="@+id/heart_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:includeFontPadding="false"
+            android:textColor="@color/widget_ink" android:text="@string/widget_sample_hr"
+            />
+
+        <!-- **The reading and its resting figure read as one phrase on the
+             left; the day's two extremes sit on the right.** They were stacked
+             in one right-hand column, which put "BPM · 53 RESTING" a long way
+             from the 76 it belongs to and made the two lines look like one
+             four-part fact. Split, each side says one thing. -->
+        <TextView
+            android:id="@+id/heart_resting"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.12"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_hr_resting" />
+
+        <TextView
+            android:id="@+id/heart_range"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="end"
+            android:textColor="@color/widget_dim"
+            android:alpha="0.85"
+            android:text="@string/widget_sample_hr_range" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/heart_chart"
+        android:src="@drawable/widget_preview_heart"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="6dp"
+        android:scaleType="fitXY"
+        android:importantForAccessibility="no" />
+
+
+    <!-- **The hours, because a line with no x axis is a shape rather than a
+         day.**
+
+         **Each label marks the START of its own quarter, and that is the whole
+         of the alignment.** Four equal cells with the last one right-aligned put
+         18:00 hard against the right edge of the card - which is midnight, not
+         six in the evening - so a line ending at 19:00 appeared to stop before
+         six. Spotted from the home screen: "it is 7pm but the data is before
+         6pm". Left-aligned in equal quarters, 00:00 lands at 0%, 06:00 at 25%,
+         12:00 at 50% and 18:00 at 75%, which is where those hours actually are. Five fixed labels on equal weights, which is all a widget's width
+         can carry legibly and enough to place a peak: a climb under 06 is
+         waking up and the same climb under 18 is a session. Static text - the
+         chart always draws midnight to midnight, so nothing here is a reading
+         and nothing needs publishing for it. -->
+    <LinearLayout
+        android:id="@+id/heart_axis"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <TextView
+            android:id="@+id/heart_axis_1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11.5sp"
+            android:letterSpacing="0.08"
+            android:maxLines="1"
+            android:gravity="start"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_axis_00" />
+
+        <TextView
+            android:id="@+id/heart_axis_2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11.5sp"
+            android:letterSpacing="0.08"
+            android:maxLines="1"
+            android:gravity="start"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_axis_06" />
+
+        <TextView
+            android:id="@+id/heart_axis_3"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11.5sp"
+            android:letterSpacing="0.08"
+            android:maxLines="1"
+            android:gravity="start"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_axis_12" />
+
+        <TextView
+            android:id="@+id/heart_axis_4"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11.5sp"
+            android:letterSpacing="0.08"
+            android:maxLines="1"
+            android:gravity="start"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_axis_18" />
+
+        
+    </LinearLayout>
+
+    <!-- Both ends of the range, because the axis is scaled to the day rather
+         than to zero and the heights are meaningless without them. -->
+    
+    <!-- **The stamp lives in the footer, and that is the set's rule.** It sat in
+         the header on this card while SLEEP and TODAY had it below, which read
+         as three widgets from three different apps. It is also what lets the
+         wordmark be centred at all: SYNCED 14:32 is far wider than the metric
+         name, so a mark placed between them could only ever sit left of centre.
+
+         The filler above it owns the slack, so the stamp is on the floor of the
+         card at every height rather than riding up under the content. -->
+    <TextView
+        android:id="@+id/heart_filler"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:importantForAccessibility="no" />
+
+    
+    <!-- **The footer is one row with two ends.** The battery sits bottom left
+         and the sync stamp bottom right, because they answer one question
+         between them - is this reading current, and will the next one arrive -
+         and reading them as one run of text made the stamp harder to find. Equal
+         weights, so neither end moves when the other's string changes length. -->
+    <LinearLayout
+        android:id="@+id/heart_footer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:baselineAligned="true"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/heart_battery"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="start"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_battery" />
+
+        <TextView
+            android:id="@+id/heart_synced"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="end"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_synced" />
+    </LinearLayout>
+</LinearLayout>

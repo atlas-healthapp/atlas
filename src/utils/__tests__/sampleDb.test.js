@@ -13,6 +13,7 @@ import {
   newestWorkoutStart,
   clearAll,
   downsampleOlderThan,
+  purgeImplausible,
 } from "@/utils/sampleDb";
 
 beforeEach(async () => {
@@ -379,5 +380,57 @@ describe("putSamples chunking", () => {
   it("still returns 0 for nothing to write", async () => {
     expect(await putSamples([])).toBe(0);
     expect(await putSamples(null)).toBe(0);
+  });
+});
+
+describe("purgeImplausible", () => {
+  const FROM = Date.parse("2020-01-01T00:00:00Z");
+  const TO = Date.parse("2026-08-20T00:00:00Z");
+
+  it("removes readings dated outside the believable window", async () => {
+    await putSamples([
+      { metric: "hrv", t: Date.parse("2026-08-19T02:00:00Z"), v: 96 },
+      { metric: "hrv", t: Date.parse("1973-03-11T00:00:00Z"), v: 12 },
+      { metric: "hrv", t: Date.parse("2106-02-07T00:00:00Z"), v: 255 },
+    ]);
+
+    const removed = await purgeImplausible(FROM, TO);
+
+    expect(removed.samples).toBe(2);
+    const kept = await getSamples("hrv", FROM, TO);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].v).toBe(96);
+  });
+
+  it("removes the rollups those readings froze", async () => {
+    // The 155 bad samples in the real archive had frozen 75 rollup rows for
+    // dates like 2105-09-08. Leaving those behind would fix the samples and
+    // keep the evidence.
+    await saveRollups("2026-08-19", { hrv: 96 });
+    await saveRollups("2105-09-08", { hrv: 255 });
+
+    const removed = await purgeImplausible(FROM, TO);
+
+    expect(removed.rollups).toBe(1);
+    expect(await loadRollups("2105-09-08")).toBeFalsy();
+    expect(await loadRollups("2026-08-19")).toEqual({ hrv: 96 });
+  });
+
+  it("takes nothing from an archive that is already clean", async () => {
+    // It runs again after every restore, so a second pass has to be a no-op.
+    await putSamples([{ metric: "hr", t: Date.parse("2026-08-19T09:00:00Z"), v: 57 }]);
+    await saveRollups("2026-08-19", { hr: 57 });
+
+    expect(await purgeImplausible(FROM, TO)).toEqual({ samples: 0, rollups: 0 });
+    expect(await getSamples("hr", FROM, TO)).toHaveLength(1);
+  });
+
+  it("keeps a surprising reading that is merely surprising", async () => {
+    // The window is about timestamps, never values. On the real archive HRV
+    // runs to 200 on real dates, and a purge that also judged values would be
+    // deleting readings to catch a fault the date already identifies.
+    await putSamples([{ metric: "hrv", t: Date.parse("2026-08-19T03:00:00Z"), v: 200 }]);
+    await purgeImplausible(FROM, TO);
+    expect(await getSamples("hrv", FROM, TO)).toHaveLength(1);
   });
 });

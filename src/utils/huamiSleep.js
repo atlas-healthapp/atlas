@@ -77,6 +77,124 @@ function decodeStageTimeline(bytes, view, sleepStartMin, footerTotals) {
   return runs;
 }
 
+// The nap block, found on 2026-08-18 by dumping the bytes nothing reads rather
+// than by looking for another endpoint. Gadgetbridge's own provider does not
+// decode this region either, which is why three rounds of work concluded the
+// band does not expose naps at all: it does, inside the night record.
+//
+// A count byte at 0x17, then up to ten 6-byte entries from 0x18: start minute,
+// **inclusive** end minute, minutes. 0x18 plus ten entries lands exactly on
+// 0x54, where the stage segments begin, which is what makes ten the cap rather
+// than a guess - a larger count would decode the hypnogram as naps.
+//
+// Two things are load-bearing and both are measured, over 28 real records:
+//
+// - **The end minute is inclusive**, unlike the night's own `sleepEndMin`. The
+//   band reported 2494 -> 2611 with 118 minutes while Zepp displayed that same
+//   nap as 17:34 to 19:32; 2611 is 19:31. The third field equalled
+//   `end - start + 1` on all twelve naps seen, so it is the duration and the
+//   band's own figure is the one stored.
+// - **The count is at 0x17, not the flag at 0x14.** 0x14 is 1 on every record
+//   carrying a nap, which is what makes it tempting, and also 1 on four records
+//   whose nap block is empty. One record carried two naps and 0x17 was 2.
+const NAP_COUNT_OFFSET = 0x17;
+const NAP_START_OFFSET = 0x18;
+const NAP_ENTRY_BYTES = 6;
+const NAP_SLOTS = (SEGMENT_COUNT_OFFSET - NAP_START_OFFSET) / NAP_ENTRY_BYTES;
+
+// **The segment array is two blocks of fifty, not one of a hundred**, which is
+// the thing that hid the nap stages: the night counts from slot 0 at 0x54, and
+// a second timeline counts from slot 50 at 0x55. What lives past the night's
+// count was written off as "plausible-looking garbage" once; it is this.
+//
+// The second block is the rest of the day around the night, so it carries each
+// nap's own stages with **0x80 segments filling the gaps** between one sleep and
+// the next (a real one ran 2129 -> 2731, exactly from the night's end to the
+// nap's start). 0x80 is therefore not a stage and is dropped: drawing it would
+// colour an afternoon at work as sleep.
+//
+// Checkable, and checked: on all eleven nap-carrying records the segments inside
+// a nap sum to exactly the minutes the nap block declares for it. The night's
+// own count reached 50 on one record and never exceeded it, which is what makes
+// fifty the block size rather than a guess.
+const DAY_SEGMENT_COUNT_OFFSET = 0x55;
+const SEGMENTS_PER_BLOCK = 50;
+const DAY_SEGMENT_START_OFFSET = SEGMENT_START_OFFSET + SEGMENTS_PER_BLOCK * SEGMENT_BYTES;
+const STAGE_NOT_ASLEEP = 0x80;
+
+/** The second block's segments, raw, in absolute minutes. */
+function dayTimeline(bytes, view) {
+  const count = Math.min(view.getUint8(DAY_SEGMENT_COUNT_OFFSET), SEGMENTS_PER_BLOCK);
+  const runs = [];
+  for (let i = 0; i < count; i++) {
+    const at = DAY_SEGMENT_START_OFFSET + i * SEGMENT_BYTES;
+    if (at + SEGMENT_BYTES > bytes.length) break;
+    const startMin = view.getUint16(at, true);
+    const endMin = view.getUint16(at + 2, true);
+    const code = view.getUint8(at + 4);
+    if (code === STAGE_NOT_ASLEEP || endMin < startMin) continue;
+    const stage = STAGE_CODES[code];
+    if (!stage) continue;
+    runs.push({ stage, startMin, endMin });
+  }
+  return runs;
+}
+
+/**
+ * The daytime sleeps recorded against one raw record.
+ *
+ * Deliberately separate from `decodeSleepSession` rather than a field on it: a
+ * day whose only sleep was a nap arrives as a record with no night at all (zero
+ * totals, a 0 -> 65535 span) which that function rightly rejects, so naps hung
+ * off the decoded night would be lost on exactly the days that have nothing
+ * else on them. Seen on the real 22 July record.
+ *
+ * Returns [] rather than null: a record with no naps and a record too short to
+ * read both mean "no daytime sleep here", and there is nothing a caller could
+ * usefully do differently about the second.
+ */
+export function decodeNaps(bytes) {
+  if (!bytes || bytes.length < MIN_BLOB_LENGTH) return [];
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const midnightTs = view.getUint32(OFFSETS.midnightTimestamp, true);
+  if (!midnightTs) return [];
+  const dayBase = midnightTs - 24 * 3600;
+
+  const count = Math.min(view.getUint8(NAP_COUNT_OFFSET), NAP_SLOTS);
+  const timeline = dayTimeline(bytes, view);
+  const naps = [];
+  for (let i = 0; i < count; i++) {
+    const at = NAP_START_OFFSET + i * NAP_ENTRY_BYTES;
+    const startMin = view.getUint16(at, true);
+    const endMin = view.getUint16(at + 2, true);
+    const minutes = view.getUint16(at + 4, true);
+    // Nonsense rather than disagreement, the same line decodeStageTimeline
+    // draws: an entry that ends before it starts, or claims no minutes, or runs
+    // longer than a day, is not a nap told slightly differently.
+    if (endMin < startMin || minutes <= 0 || minutes > 24 * 60) continue;
+    // Its own stages: the ones inside its own window, timed from its own start,
+    // in the same shape the night's timeline uses so one component can draw
+    // either. A nap the band gave no stages for keeps null rather than an empty
+    // list, which is the distinction `decodeStageTimeline` already draws
+    // between "none sent" and "none happened".
+    const stages = timeline
+      .filter((run) => run.startMin >= startMin && run.endMin <= endMin)
+      .map((run) => ({
+        stage: run.stage,
+        startMinute: run.startMin - startMin,
+        minutes: run.endMin - run.startMin + 1,
+      }));
+    naps.push({
+      bedTime: new Date((dayBase + startMin * 60) * 1000),
+      wakeTime: new Date((dayBase + (endMin + 1) * 60) * 1000),
+      minutes,
+      stageTimeline: stages.length ? stages : null,
+    });
+  }
+  return naps;
+}
+
 // bytes: Uint8Array. Returns null for blobs too short/malformed to trust
 // (e.g. a still-forming session synced before the device finished computing
 // it - seen in practice as an all-zero/garbage row in real exports).

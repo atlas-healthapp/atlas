@@ -3,14 +3,14 @@
     <PullIndicator :pull="pull" :refreshing="refreshing" :armed="armed" :note="note" />
     <AppHeader label="BODY" :meta="`${dayCount} DAYS OF READINGS`" />
 
-    <div v-if="!hasReadings" class="panel">
+    <div v-if="loaded && !hasReadings" class="panel">
       <div class="panel-hd"><span>NO READINGS YET</span></div>
       <div class="dim-text mono">
         CONNECT THE STRAP IN SETTINGS TO START COLLECTING BODY METRICS.
       </div>
     </div>
 
-    <template v-else>
+    <template v-else-if="hasReadings">
       <!-- Above TODAY, because it is the slowest-moving thing on the page and
            the one the rest of it accumulates into: a recovery score is about
            last night and this is about the last month of them. -->
@@ -190,6 +190,22 @@ function openRow(row) {
 }
 
 const dayWindow = ref([]);
+/**
+ * Has the archive answered yet?
+ *
+ * **Separate from whether it holds anything**, because until this exists the two
+ * are the same state and the tab tells a month-old archive it has no readings
+ * and should connect a strap. Reported 2026-08-19 after tapping a widget, which
+ * cold-starts the app: the read is queued behind the sync the launch kicks off,
+ * so the false empty state stood for the whole sync rather than for a frame.
+ *
+ * Set in a `finally`, the same as Home's `dataReady` and for the same reason: a
+ * read that throws must still release the gate, or the tab claims to be loading
+ * for ever. This is the empty-state half of the rule the file already carries
+ * one comment about - readings you have are readings you have - and a read that
+ * has not come back is not an answer about what you have.
+ */
+const loaded = ref(false);
 
 /**
  * Sessions for the activity index, which is a fitness age input and nothing else
@@ -206,7 +222,11 @@ const sessions = computed(() => resolveSessions(rawSessions.value, sessionStore)
 async function loadWindow() {
   const to = today();
   const from = addDays(to, -(WINDOW_DAYS - 1));
-  dayWindow.value = await dailyValuesForRange(from, to);
+  try {
+    dayWindow.value = await dailyValuesForRange(from, to);
+  } finally {
+    loaded.value = true;
+  }
   // Not awaited alongside: the fitness age is the slowest thing on the page and
   // the rows above it should not wait on a second read to draw.
   getWorkouts(Date.parse(`${addDays(to, -(WINDOW_DAYS - 1))}T00:00:00`), Date.now())
@@ -229,6 +249,19 @@ async function loadWindow() {
 // the first time BODY was opened.
 onMounted(loadWindow);
 onActivated(loadWindow);
+
+/**
+ * Arriving from the heart widget, which is what BODY owns.
+ *
+ * **Claimed rather than consumed**: `claimOpen` only clears the target when it
+ * is this one, so a tab cannot swallow another tab's arrival. Run on activation
+ * too, since the tab may already be mounted inside KeepAlive when the tap lands.
+ */
+function claimWidgetTarget() {
+  if (ui.claimOpen("heart")) heartOpen.value = true;
+}
+onMounted(claimWidgetTarget);
+onActivated(claimWidgetTarget);
 // A sync can finish while this tab is already visible. SettingsPage is a
 // sibling overlay outside the KeepAlive block, so tapping SYNC NOW there never
 // activates this component and neither hook above fires.

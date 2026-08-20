@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The same ground, for the two light themes.
+
+     A second drawable rather than a tint set in code, because a widget's corner
+     radius is part of its shape and setBackgroundColor would square it off. The
+     provider swaps the resource with setInt(..., "setBackgroundResource", ...).
+
+     Which one is used is decided by the app's own theme, read from
+     `atlas_theme_native` - not by a values-night/ qualifier, which follows the
+     system's night mode. A widget sits on the wallpaper rather than in the
+     shade, so the system's idea of night says nothing about what is behind it. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_panel_light" />
+    <corners android:radius="18dp" />
+</shape>

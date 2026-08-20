@@ -40,7 +40,7 @@ export const BUCKET_MINUTES = 6;
  */
 export const RESTING_PERCENTILE = 10;
 
-function percentile(sorted, p) {
+export function percentile(sorted, p) {
   if (!sorted.length) return null;
   return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length * p) / 100))];
 }
@@ -81,7 +81,10 @@ export function runSegments(columns = [], bucket = BUCKET_MINUTES) {
   return out;
 }
 
-export function heartDayGeometry(samples, { height = 96, sessions = [], bucket = BUCKET_MINUTES } = {}) {
+export function heartDayGeometry(
+  samples,
+  { height = 96, sessions = [], bucket = BUCKET_MINUTES, resting: restingOverride = null } = {}
+) {
   const points = (samples ?? [])
     .filter((s) => s && Number.isFinite(s.t) && Number.isFinite(s.v))
     .sort((a, b) => a.t - b.t);
@@ -151,7 +154,21 @@ export function heartDayGeometry(samples, { height = 96, sessions = [], bucket =
     });
 
   const sorted = [...values].sort((a, b) => a - b);
-  const resting = percentile(sorted, RESTING_PERCENTILE);
+  // **The archive's night-scoped figure when there is one, this day's tenth
+  // percentile when there is not.**
+  //
+  // Atlas showed two resting heart rates: BODY's row read the rollup, which has
+  // been scoped to the sleep window since 2026-08-14, and this page read a
+  // percentile of the waking day - 53 in one place and 52 in the other, for the
+  // same date, with nothing on either screen to say why. The user's call
+  // (2026-08-19) is that the overnight figure is the truth, which is also the
+  // one with an argument behind it: a resting rate measured while you are
+  // awake is a different quantity depending on what hour you look at it.
+  //
+  // The percentile stays as the fallback, for a date whose night was never
+  // recorded. It is a worse answer than the rollup and a better one than a
+  // blank line through the middle of the chart.
+  const resting = restingOverride ?? percentile(sorted, RESTING_PERCENTILE);
 
   return {
     height,

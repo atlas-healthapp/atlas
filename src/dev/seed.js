@@ -164,17 +164,6 @@ export async function seedIfEmpty() {
   };
   persist("atlas_food_library", [oats, burrito, salmon, yoghurt, bar, kebab]);
 
-  const dow = new Date(today() + "T12:00:00").getDay();
-  const schedule = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
-  const template = [
-    { time: "07:30", mealId: oats.id },
-    { time: "12:30", mealId: burrito.id },
-    { time: "19:00", mealId: salmon.id },
-  ];
-  // each weekday gets its own copy - sharing one array reference across days
-  // means a future in-place edit to one day would silently edit all seven
-  for (let d = 0; d < 7; d++) schedule[d] = template.map((t) => ({ ...t }));
-  persist("atlas_food_schedule", schedule);
 
   // Today's plan: first two meals already confirmed, snack logged, dinner pending
   persist("atlas_food_dayplans", [

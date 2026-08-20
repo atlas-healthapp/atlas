@@ -36,7 +36,12 @@ const DELIBERATELY_EXCLUDED = {
   atlas_helio_last_sync: "cache, refilled by the next sync",
   atlas_helio_battery: "cache, refilled by the next sync",
   atlas_summary_native: "a mirror of state that is carried",
+  // A handoff, not a setting: MainActivity writes which widget was tapped and
+  // App.vue reads it and clears it on the next resume. It is meaningless a
+  // second later, let alone on another phone.
+  atlas_widget_open: "transient handoff, cleared as soon as it is read",
   atlas_gadgetbridge_connected: "dead key, the relay was retired 2026-08-12",
+  atlas_food_schedule: "dead key, the weekly template was removed 2026-08-18",
   atlas_session_types_seeded: "dead key, seeding was replaced by suggestions",
   atlas_helio_deep_fetch_version: "re-asking deep is slow, never wrong",
   atlas_hr_rollup_backfill_2026_08_06: "additive repair, safe to re-run",
@@ -50,6 +55,24 @@ const DELIBERATELY_EXCLUDED = {
   // phone's last few hours, useless on a restored one and rebuilt within
   // minutes of use.
   atlas_helio_sync_trail: "diagnostic ring buffer, rebuilt by use",
+  // **Deliberately not carried, and this one is a deletion.** The rule above
+  // says a destructive migration flag has to travel with the backup so the
+  // repair cannot run twice - and this is the case that inverts it. A backup
+  // taken before the purge existed CONTAINS the impossible readings, so a
+  // restored archive needs the purge to run again on the phone it lands on.
+  // Re-running is also harmless by construction: it only ever removes rows
+  // whose timestamps `normaliseSamples` would refuse today, so a second pass
+  // over a clean archive removes nothing.
+  atlas_sample_purge_2026_08_19: "a restored archive may still hold the junk",
+  // **Excluded because restoring it would be worse than losing it**, which is a
+  // stronger reason than the caches above. `stopSession` measures a session as
+  // `Date.now() - startMillis`, so a running session restored onto a phone days
+  // later is not a stale row to ignore: the moment it is stopped it records a
+  // multi-day workout, and a manual session with an absurd duration then feeds
+  // the calorie estimate and the week chart. Losing an in-progress session on
+  // restore costs one start time somebody can retype; carrying it corrupts the
+  // archive it was meant to protect.
+  atlas_session_running: "in progress right now, and a restored one would record days",
   atlas_theme_native: "written natively for the launch screen, mirrors atlas_theme",
   atlas_tour_seen: "a tour replaying once is not data loss",
   atlas_settings_intro_seen: "as above, for the settings explainer",

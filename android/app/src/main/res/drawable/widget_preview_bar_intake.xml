@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A sample dial fill, for the widget picker alone. Overwritten by
+     setImageViewBitmap on the first draw, so it is never seen on a placed
+     widget. See Spark.bar for why these are drawn rather than tinted. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="2dp" />
+            <solid android:color="@color/widget_intake_track" />
+        </shape>
+    </item>
+    <item android:right="70dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="2dp" />
+            <solid android:color="@color/widget_intake" />
+        </shape>
+    </item>
+</layer-list>

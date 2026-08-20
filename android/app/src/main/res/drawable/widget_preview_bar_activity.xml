@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A sample steps gauge, for the widget picker alone. Overwritten by
+     setImageViewBitmap on the first draw. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="2dp" />
+            <solid android:color="@color/widget_activity_track" />
+        </shape>
+    </item>
+    <item android:right="30dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="2dp" />
+            <solid android:color="@color/widget_activity" />
+        </shape>
+    </item>
+</layer-list>

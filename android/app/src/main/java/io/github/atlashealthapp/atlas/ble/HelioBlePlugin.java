@@ -1,6 +1,9 @@
 package io.github.atlashealthapp.atlas.ble;
 
 import android.Manifest;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.os.Build;
 import android.util.Base64;
 
@@ -559,6 +562,200 @@ public class HelioBlePlugin extends Plugin {
     @PluginMethod
     public void refreshNotification(final PluginCall call) {
         HelioSyncService.refreshNotification(getContext());
+        // **Not inside the service call**, which returns early when the service
+        // is not running. A widget on the home screen has to redraw whether or
+        // not a background service happens to be up, and this is the moment the
+        // app has just published a fresh summary.
+        io.github.atlashealthapp.atlas.widget.AtlasWidgets.refreshAll(getContext());
+        call.resolve();
+    }
+
+    /**
+     * The newest live heart rate the background service has streamed.
+     *
+     * <p><b>The app reads this instead of opening a stream of its own, and that
+     * is the whole point.</b> The strap takes one BLE central at a time. With the
+     * session sheet starting its own stream while the service held one, the two
+     * fought: the sheet sat on READING THE STRAP forever, the app's own sync
+     * failed with the link busy, and the shade - fed by the service that had won
+     * the race - was the only surface showing anything. Reported exactly that way.
+     *
+     * <p>So the service owns the radio and every surface reads what it publishes.
+     * That is the same division the widgets already run on, pointed the other way:
+     * for stored data the app is the authority and native restates it; for a live
+     * reading only one process can hold the link, and it has to be the one that
+     * keeps running when the app is closed.
+     *
+     * <p>Returns nulls rather than failing when there is no reading yet, so a
+     * caller can tell "not connected yet" from "no session".
+     */
+    @PluginMethod
+    public void liveHeartRate(final PluginCall call) {
+        final android.content.SharedPreferences prefs =
+                getContext().getSharedPreferences(
+                        HelioSyncService.PREFS, android.content.Context.MODE_PRIVATE);
+        final int bpm = prefs.getInt(HelioSyncService.KEY_LIVE_HR, -1);
+        final long at = prefs.getLong(HelioSyncService.KEY_LIVE_HR_AT, 0);
+        final JSObject result = new JSObject();
+        result.put("bpm", bpm > 0 ? bpm : null);
+        result.put("at", at > 0 ? at : null);
+        call.resolve(result);
+    }
+
+    /**
+     * Every live reading kept during the session in progress.
+     *
+     * <p>This is what makes a recap possible for a session the band has not yet
+     * handed over - which for anything short is most of them. The archive copy
+     * arrives later and is better (it covers the whole window, not only the parts
+     * where the screen was on), so a caller merges rather than choosing.
+     */
+    @PluginMethod
+    public void sessionHeartTrail(final PluginCall call) {
+        final String raw = getContext()
+                .getSharedPreferences(HelioSyncService.PREFS, android.content.Context.MODE_PRIVATE)
+                .getString(HelioSyncService.KEY_LIVE_TRAIL, "[]");
+        final JSObject result = new JSObject();
+        try {
+            result.put("trail", new JSArray(raw));
+        } catch (final org.json.JSONException e) {
+            result.put("trail", new JSArray());
+        }
+        call.resolve(result);
+    }
+
+    /**
+     * Start a fresh trail. Called when a session starts, never between readings.
+     *
+     * <p>A trail is about one session; carrying yesterday's into today's recap
+     * would draw a chart of two different afternoons joined in the middle.
+     */
+    @PluginMethod
+    public void clearSessionHeartTrail(final PluginCall call) {
+        getContext()
+                .getSharedPreferences(HelioSyncService.PREFS, android.content.Context.MODE_PRIVATE)
+                .edit()
+                .remove(HelioSyncService.KEY_LIVE_TRAIL)
+                .apply();
+        call.resolve();
+    }
+
+    /**
+     * Every device bonded to this phone, so a person can say which one is theirs.
+     *
+     * <p><b>The list, not a verdict.</b> {@code likelyStrap} says only whether
+     * {@link HelioLink#matchesStrapName} recognises the name, which is exactly
+     * the rule that has already failed by the time anybody looks at this screen.
+     * It orders the list and nothing more. Atlas does not otherwise guess which
+     * of somebody's Bluetooth devices is a fitness band, because the plausible
+     * guesses and somebody's earbuds are the same shape.
+     *
+     * <p>An empty list is a real and useful answer: it means nothing at all is
+     * paired, which needs Android's Bluetooth settings rather than anything here.
+     */
+    @PluginMethod
+    public void listBondedDevices(final PluginCall call) {
+        final JSObject result = new JSObject();
+        final JSArray devices = new JSArray();
+        final BluetoothManager manager = getContext().getSystemService(BluetoothManager.class);
+        final BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
+        if (adapter == null) {
+            result.put("supported", false);
+            result.put("enabled", false);
+            result.put("devices", devices);
+            call.resolve(result);
+            return;
+        }
+        result.put("supported", true);
+        result.put("enabled", adapter.isEnabled());
+        if (!adapter.isEnabled()) {
+            // Bluetooth off returns no bonds rather than an error: the list would
+            // be empty and that reads as "nothing is paired", which is a different
+            // and wrong thing to tell somebody.
+            result.put("devices", devices);
+            call.resolve(result);
+            return;
+        }
+        final String chosen = getContext()
+                .getSharedPreferences(HelioSyncService.PREFS, android.content.Context.MODE_PRIVATE)
+                .getString(HelioSyncService.KEY_STRAP_ADDRESS, null);
+        // Keyed by address so a device that is both bonded and currently
+        // connected is one row rather than two.
+        final java.util.LinkedHashMap<String, JSObject> found = new java.util.LinkedHashMap<>();
+        try {
+            for (final BluetoothDevice device : adapter.getBondedDevices()) {
+                found.put(device.getAddress().toUpperCase(java.util.Locale.ROOT),
+                        describe(device, true, false, chosen));
+            }
+
+            // **Bonded is not the same as connected, and on the 1.0.6 report this
+            // is the difference** (2026-08-19). Five devices were bonded to that
+            // phone and the reporter confirmed none of them is the strap: the
+            // oddly named one is their laptop. So no list built from
+            // getBondedDevices could ever have shown their band, and a picker
+            // offering four sets of earbuds would have been worse than useless.
+            //
+            // A BLE device can hold a GATT connection having never been bonded,
+            // which is the live explanation for a strap that plainly works while
+            // Atlas says it is not paired.
+            //
+            // This is the one way to see those without scanning, which HelioLink
+            // avoids on purpose: a scan drags in the location permission and a
+            // whole class of discovery timing bugs. getConnectedDevices needs
+            // nothing Atlas does not already hold.
+            for (final BluetoothDevice device
+                    : manager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT)) {
+                final String key = device.getAddress().toUpperCase(java.util.Locale.ROOT);
+                final JSObject existing = found.get(key);
+                if (existing != null) {
+                    existing.put("connected", true);
+                } else {
+                    found.put(key, describe(device, false, true, chosen));
+                }
+            }
+        } catch (final SecurityException e) {
+            // BLUETOOTH_CONNECT can be revoked between the check and the call.
+            call.reject("Atlas needs the Bluetooth permission to list paired devices");
+            return;
+        }
+        for (final JSObject entry : found.values()) devices.put(entry);
+        result.put("devices", devices);
+        call.resolve(result);
+    }
+
+    /** One row of the device list. Split out so bonded and connected build it identically. */
+    private JSObject describe(final BluetoothDevice device, final boolean bonded,
+                              final boolean connected, final String chosen) {
+        final JSObject entry = new JSObject();
+        final String name = device.getName();
+        entry.put("name", name == null ? "" : name);
+        entry.put("address", device.getAddress());
+        entry.put("likelyStrap", HelioLink.matchesStrapName(name));
+        entry.put("chosen", device.getAddress().equalsIgnoreCase(chosen));
+        entry.put("bonded", bonded);
+        entry.put("connected", connected);
+        return entry;
+    }
+
+    /**
+     * Remembers which bonded device is the strap, by address.
+     *
+     * <p>Passing null or an empty address clears it, which puts the name rules
+     * back in charge. That is the way out of a wrong pick, and it matters because
+     * a wrong pick otherwise persists across restarts exactly as well as a right
+     * one does.
+     */
+    @PluginMethod
+    public void setStrapAddress(final PluginCall call) {
+        final String address = call.getString("address");
+        final android.content.SharedPreferences.Editor edit = getContext()
+                .getSharedPreferences(HelioSyncService.PREFS, android.content.Context.MODE_PRIVATE)
+                .edit();
+        if (address == null || address.trim().isEmpty()) {
+            edit.remove(HelioSyncService.KEY_STRAP_ADDRESS).apply();
+        } else {
+            edit.putString(HelioSyncService.KEY_STRAP_ADDRESS, address.trim()).apply();
+        }
         call.resolve();
     }
 

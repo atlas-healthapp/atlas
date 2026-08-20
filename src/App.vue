@@ -35,7 +35,7 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { useUIStore } from "@/stores/ui";
 import TabBar from "./components/layout/TabBar.vue";
 import CreateFab from "./components/layout/CreateFab.vue";
@@ -51,18 +51,60 @@ import { TOUR_STEPS } from "./components/onboarding/tourSteps";
 import { watch } from "vue";
 import { useProfileStore } from "@/stores/profile";
 import { useAutoSync } from "@/composables/useAutoSync";
+import { useSessionsStore } from "@/stores/sessions";
+import { useHelioStore } from "@/stores/helio";
+import { useCheckinStore } from "@/stores/checkin";
 
 // Ensures the theme store initialises (and applies data-theme) before first paint
 import { useThemeStore } from "@/stores/theme";
 useThemeStore();
 
 const profile = useProfileStore();
+const sessions = useSessionsStore();
+const helio = useHelioStore();
+const checkin = useCheckinStore();
 
 
 // Keeps the numbers current while the app is open: a refresh on resume and a
 // tick while it is in front of you. Lives here rather than on Home because
 // coming back to the app on FITNESS should refresh it too.
 useAutoSync();
+
+/**
+ * Fill in a manual session's heart rate and calories whenever a sync lands.
+ *
+ * **Here rather than in the sheet that stopped the session.** The readings are
+ * not available at STOP - the band hands the window over later - so a sheet that
+ * computed them once would compute them at the only moment they cannot be known.
+ * Watching the sync means it fills in whenever it can, however the app got there:
+ * a background run drained on resume, a pull-to-refresh, or the forced sync STOP
+ * itself asks for.
+ *
+ * Failures are swallowed on purpose. This is an enrichment of rows that already
+ * render correctly without it, and an archive read that throws must not take the
+ * app down with it.
+ */
+watch(
+  () => helio.lastSyncAt,
+  async () => {
+    try {
+      const { measurePendingSessions, profileFor } = await import(
+        "@/composables/useSessionMeasurements"
+      );
+      const { getWorkouts } = await import("@/utils/sampleDb");
+      // The band's own records, only ever read, and only to fit the personal
+      // calorie constant against figures it actually measured.
+      const band = await getWorkouts(Date.now() - 120 * 86400_000, Date.now());
+      await measurePendingSessions({
+        sessionsStore: sessions,
+        profile: profileFor(profile, checkin),
+        bandSessions: band,
+      });
+    } catch {
+      // Nothing here is load-bearing for what is already on screen.
+    }
+  }
+);
 
 // Status-bar icon style lives in the theme store now (light themes need
 // dark icons); it applies on store init and on every theme change.
@@ -82,6 +124,60 @@ if (Capacitor.isNativePlatform()) {
 }
 
 const ui = useUIStore();
+
+/**
+ * Arriving from a widget: land on the thing the widget was showing.
+ *
+ * **The target is read here and routed here, but opened by whichever tab owns
+ * the page.** App.vue cannot open a drill-through - they are mounted inside the
+ * tabs, and a tab inside `<KeepAlive>` takes anything it teleports with it - so
+ * this switches to the owning tab and leaves the target for it to claim.
+ *
+ * Read on mount and on every resume, because a widget tap on a running app is a
+ * resume rather than a launch. `MainActivity` writes it into the same
+ * SharedPreferences group the theme already travels in; nothing native can
+ * reach the app any other way round.
+ */
+const OPEN_TAB = { steps: "activity", heart: "body", sleep: "home", home: "home" };
+
+async function readWidgetTarget() {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    const { Preferences } = await import("@capacitor/preferences");
+    const { value } = await Preferences.get({ key: "atlas_widget_open" });
+    if (!value) return;
+    // Cleared immediately, so a target can never be acted on twice - once by
+    // the tab that owns it and again on the next resume.
+    await Preferences.set({ key: "atlas_widget_open", value: "" });
+    // **The running session opens its sheet rather than a tab**, because the
+    // thing you came here to do is stop it, and the sheet is the only place that
+    // can. It is not in OPEN_TAB for the same reason: there is no tab that owns
+    // a running session now that the row appears under every one of them.
+    //
+    // Native cannot end a session itself - the record lives in localStorage,
+    // which Java cannot reach - so the notification's STOP brings you to the app
+    // and the app does it. That is the same division the widgets run on: the app
+    // is the authority, native restates it.
+    if (value === "session") {
+      ui.openCreateSheet("add-activity");
+      return;
+    }
+    const tab = OPEN_TAB[value];
+    if (!tab) return;
+    ui.setTab(tab);
+    // HOME needs no claim: it is where the TODAY card already points.
+    if (value !== "home") ui.pendingOpen = value;
+  } catch {
+    // A widget that cannot say where it came from still opens the app.
+  }
+}
+
+onMounted(readWidgetTarget);
+if (Capacitor.isNativePlatform()) {
+  import("@capacitor/app").then(({ App: CapApp }) => {
+    CapApp.addListener("resume", readWidgetTarget);
+  });
+}
 
 /**
  * Only on Home, and only once the boot animation has ended.

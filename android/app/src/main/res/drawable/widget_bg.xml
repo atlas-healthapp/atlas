@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget paints its own ground, unlike the notification.
+
+     A notification sits in the shade and inherits its night mode, which is why
+     the notif colours live in values/ and values-night/ and nothing in Java
+     picks between them. A widget sits on the wallpaper, where there is no theme
+     to inherit and no way to know what is behind it. So it draws a surface and
+     controls its own contrast, in the app panel colour rather than a
+     translucent tint a light wallpaper would wash out. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_panel" />
+    <corners android:radius="18dp" />
+</shape>

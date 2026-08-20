@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A day's heart rate, for the picker alone. Overwritten on the first draw.
+     The break in the middle is deliberate and is the one thing about this chart
+     worth previewing: an hour off the wrist breaks the line rather than being
+     drawn across, so it cannot be read as an hour of steady heart rate. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="40dp"
+    android:viewportWidth="200"
+    android:viewportHeight="40">
+    <path
+        android:pathData="M4,28 L14,31 L24,26 L34,33 L44,30 L54,34 L64,29 L74,22 L84,25 L94,14"
+        android:strokeColor="@color/widget_body"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M124,20 L134,11 L144,17 L154,8 L164,16 L174,12 L184,19 L194,15"
+        android:strokeColor="@color/widget_body"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

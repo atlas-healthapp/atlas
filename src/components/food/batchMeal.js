@@ -8,6 +8,7 @@
 
 import { uid } from "@/utils/date";
 import { formatAmount } from "./rowDetail";
+import { parseServingSize, baseUnitForScan } from "@/utils/servingSize";
 
 export const MACRO_KEYS = ["protein", "kcal", "carbs", "fat", "fibre"];
 
@@ -65,11 +66,12 @@ export function macrosMatch(a, b) {
 export function entryFromScan(scanned, existing = null, existingMacros = null) {
   const per100g = scanned.servingBasis === "100g";
   const baseAmount = existing ? existing.baseAmount || 1 : per100g ? 100 : 1;
-  const baseUnit = existing
-    ? existing.baseUnit || "serving"
-    : per100g
-      ? "g"
-      : scanned.servingSize || "serving";
+  // **Never the scan's serving description.** This read
+  // `scanned.servingSize || "serving"`, and that field is free text a contributor
+  // typed, so a real library collected 23 distinct "units" like `11 chips (27 g)`
+  // and `60.0g`. The unit is the noun a quantity counts; what one of them weighs
+  // is a portion, and it goes in the field named for it below.
+  const baseUnit = existing ? existing.baseUnit || "serving" : baseUnitForScan(scanned.servingBasis);
 
   return {
     key: uid(),
@@ -78,7 +80,9 @@ export function entryFromScan(scanned, existing = null, existingMacros = null) {
     name: existing?.name ?? scanned.name,
     baseAmount,
     baseUnit,
-    portion: existing?.portion ?? null,
+    // A match keeps whatever the library already knows: its portion was either
+    // set by hand or parsed the same way, and either beats re-reading prose.
+    portion: existing?.portion ?? (existing ? null : parseServingSize(scanned.servingSize)),
     quantity: baseAmount,
     scannedMacros: pickMacros(scanned),
     libraryMacros: existing ? pickMacros(existingMacros) : null,
@@ -145,9 +149,11 @@ export function entryAmount(entry) {
  * How much one tap of the stepper moves.
  *
  * Half a unit is right for eggs and slices and absurd for grams, and a per-100g
- * scan lands here as a base amount of 100. The split is on the base amount
- * rather than on the unit string, because the unit can be anything Open Food
- * Facts wrote in it.
+ * scan lands here as a base amount of 100. The split is on the base amount rather
+ * than on the unit string, which used to be because the unit could be any prose
+ * Open Food Facts held. It cannot any more (see `entryFromScan`), but the base
+ * amount is still the better signal: a hand-made item can be measured in grams
+ * with a base amount of 1, and stepping that by 10 would be absurd.
  */
 export function quantityStep(baseAmount) {
   return (baseAmount || 1) >= 10 ? 10 : 0.5;

@@ -94,7 +94,7 @@
     </HomeCard>
 
     <HomeCard title="THIS MONTH" :color="famColor('workouts')" :meta="fmtMinutes(month.total)">
-      <div v-if="!month.rows.length" class="calib mono">NOTHING LOGGED THIS MONTH.</div>
+      <div v-if="loaded && !month.rows.length" class="calib mono">NOTHING LOGGED THIS MONTH.</div>
       <div v-for="row in month.rows" :key="row.name ?? 'unnamed'" class="typerow">
         <span class="tname mono" :class="{ untyped: row.unnamed }">
           {{ row.unnamed ? "UNNAMED" : row.name }}
@@ -111,7 +111,7 @@
          do not care about scrolls away; a card that demanded you deal with it
          never would. -->
     <HomeCard title="SESSIONS" :color="famColor('workouts')" :meta="unnamedMeta">
-      <div v-if="!sessions.length" class="calib mono">
+      <div v-if="loaded && !sessions.length" class="calib mono">
         NO SESSIONS IN THE LAST {{ WINDOW_DAYS }} DAYS.
       </div>
       <MetricRow
@@ -134,6 +134,7 @@
       v-if="openSession"
       :workout="openSession"
       :siblings="sessions"
+      :band-records="rawSessions"
       @close="openSession = null"
     />
   </div>
@@ -218,18 +219,36 @@ const rawSessions = ref([]);
  */
 const sessions = computed(() => resolveSessions(rawSessions.value, sessionStore));
 
+/**
+ * Has the archive answered yet?
+ *
+ * **A card saying NOTHING LOGGED before the read comes back is a lie, not a
+ * blank.** Reported 2026-08-19: tapping a widget cold-starts the app, the reads
+ * queue behind the sync the launch kicks off, and both cards below spent that
+ * whole sync claiming a month with sessions in it was empty. The tiles above
+ * show `--` while they wait, which is honest; a sentence is not.
+ *
+ * Set in a `finally` for the same reason Home's `dataReady` is: a read that
+ * throws must still release it, or the cards never say anything again.
+ */
+const loaded = ref(false);
+
 async function loadWindow() {
   const to = today();
   const from = addDays(to, -(WINDOW_DAYS - 1));
-  dayWindow.value = await dailyValuesForRange(from, to);
+  try {
+    dayWindow.value = await dailyValuesForRange(from, to);
 
-  // A month can start before the 31-day window on the last day of a long
-  // month, so the session query reaches back to whichever is earlier.
-  const earliest = monthStart(to) < from ? monthStart(to) : from;
-  const fromMillis = new Date(`${earliest}T00:00:00`).getTime();
-  const toMillis = new Date(`${to}T23:59:59.999`).getTime();
-  const found = await getWorkouts(fromMillis, toMillis);
-  rawSessions.value = [...found].sort((a, b) => b.startMillis - a.startMillis);
+    // A month can start before the 31-day window on the last day of a long
+    // month, so the session query reaches back to whichever is earlier.
+    const earliest = monthStart(to) < from ? monthStart(to) : from;
+    const fromMillis = new Date(`${earliest}T00:00:00`).getTime();
+    const toMillis = new Date(`${to}T23:59:59.999`).getTime();
+    const found = await getWorkouts(fromMillis, toMillis);
+    rawSessions.value = [...found].sort((a, b) => b.startMillis - a.startMillis);
+  } finally {
+    loaded.value = true;
+  }
 }
 
 // onMounted alone is not enough: App.vue wraps the tabs in KeepAlive, so this
@@ -237,6 +256,13 @@ async function loadWindow() {
 // the first time FITNESS was opened.
 onMounted(loadWindow);
 onActivated(loadWindow);
+
+/** Arriving from the steps widget, which is what FITNESS owns. */
+function claimWidgetTarget() {
+  if (ui.claimOpen("steps")) openMetric.value = METRICS.steps;
+}
+onMounted(claimWidgetTarget);
+onActivated(claimWidgetTarget);
 // A sync can finish while this tab is already visible. SettingsPage is a
 // sibling overlay outside the KeepAlive block, so tapping SYNC NOW there never
 // activates this component and neither hook above fires.

@@ -14,6 +14,13 @@
     <color name="notif_activity_track">#382dd4bf</color>
     <color name="notif_recovery_track">#38fcd34d</color>
 
+    <!-- **A slot that can hold any metric cannot carry that metric's colour.**
+         A ProgressBar's tint is not remotable before API 31 and Atlas supports
+         26, so the three dial rows share one neutral pair and the label does the
+         identifying. -->
+    <color name="notif_accent">#4b5563</color>
+    <color name="notif_accent_track">#3d4b5563</color>
+
     <color name="notif_hairline">#22ffffff</color>
 
     <color name="notif_ink">#ffffff</color>

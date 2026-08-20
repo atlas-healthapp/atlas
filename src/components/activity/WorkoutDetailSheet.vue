@@ -213,6 +213,20 @@
           </button>
         </div>
 
+        <!-- **Two records of one session, and only one of them is on screen.**
+             The band decided this window was a workout and Atlas timed it too;
+             the band's is shown by default because it carries the calories, the
+             heart-rate summary and its own active time. This is the way to the
+             other one, and the choice sticks. -->
+        <div v-if="overlap" class="overlap">
+          <p class="overlaptext">
+            {{ overlapText }}
+          </p>
+          <button type="button" class="action mono" @click="useOther">
+            {{ overlap.showing === "band" ? "USE THE ONE I STARTED" : "USE THE STRAP'S RECORD" }}
+          </button>
+        </div>
+
         <div class="actions">
           <button
             v-if="mergeCandidate && !workout.merged"
@@ -253,7 +267,12 @@
           >
             UNDO THIS CUT
           </button>
+          <!-- **Replaced by the confirm rather than sitting above it.** With both
+               on screen there were three buttons at once and two of them said
+               delete, so the question "are you sure" was being asked next to the
+               control that asked it. The confirm takes this button's place. -->
           <button
+            v-if="!confirmingDelete"
             type="button"
             class="action danger mono"
             @click="confirmingDelete = true"
@@ -295,6 +314,7 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { useBackClose } from "@/composables/useBackClose";
 import { useSessionsStore } from "@/stores/sessions";
+import { pairContaining } from "./sessionOverlap";
 import { getSamples } from "@/utils/sampleDb";
 import { workoutDateTimeLabel, workoutDurationLabel } from "./workouts";
 import {
@@ -313,11 +333,54 @@ const props = defineProps({
   workout: { type: Object, required: true },
   /** Every session on the tab, so merge can find a neighbour. */
   siblings: { type: Array, default: () => [] },
+  /**
+   * The band's own records, unresolved.
+   *
+   * Needed because the other half of an overlapping pair has already been
+   * suppressed by `resolveSessions` before anything rendered, so it cannot be
+   * found among the siblings.
+   */
+  bandRecords: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["close", "changed"]);
 useBackClose(() => emit("close"));
 
 const confirmingDelete = ref(false);
+
+/**
+ * The other record of this session, if the band and Atlas both have one.
+ *
+ * Computed from the raw band records rather than the sibling list, because the
+ * loser of a pair is dropped before the list is built - it cannot be a sibling.
+ */
+const overlap = computed(() =>
+  pairContaining(props.workout, sessions.manualSessions, props.bandRecords)
+);
+
+const overlapText = computed(() => {
+  if (!overlap.value) return "";
+  const other = overlap.value.showing === "band" ? overlap.value.manual : overlap.value.band;
+  const from = new Date(other.startMillis).toLocaleTimeString("en-AU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const mins = Math.round((other.endMillis - other.startMillis) / 60000);
+  return overlap.value.showing === "band"
+    ? `You also started a session for this, from ${from} for ${mins} minutes. The strap's own record is shown because it measured calories and heart rate.`
+    : `The strap also recorded this, from ${from} for ${mins} minutes, with its own calories and heart rate.`;
+});
+
+function useOther() {
+  // Recorded against the manual session either way: the band overwrites its
+  // workouts on every sync, so a choice filed there would not survive one.
+  sessions.setOverlapChoice(
+    overlap.value.manual.startMillis,
+    overlap.value.showing === "band" ? "manual" : "band"
+  );
+  emit("changed");
+  emit("close");
+}
 
 /**
  * The nearest session that could plausibly be the same one.
@@ -803,6 +866,20 @@ const calories = computed(() =>
 }
 .editnote.unsaved {
   color: var(--fam-activity);
+}
+/* Its own block above the actions, not a row in the field list: the list is
+   what this session WAS, and this is a question about which record of it you are
+   reading. */
+.overlap {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-line);
+}
+.overlaptext {
+  margin: 0 0 10px;
+  font-size: var(--fs-second);
+  line-height: 1.5;
+  color: var(--dim);
 }
 .actions {
   display: flex;

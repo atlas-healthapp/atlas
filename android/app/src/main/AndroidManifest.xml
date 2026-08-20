@@ -36,6 +36,81 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- The home screen readout. Exported because the launcher hosts it in
+             its own process; it reads the published summary and nothing else, so
+             there is nothing here another app could ask it to do. -->
+        <receiver
+            android:name=".widget.AtlasWidget"
+            android:label="@string/widget_today_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/atlas_widget_info" />
+        </receiver>
+
+        <!-- Steps, with the day's own shape behind the count. A provider per
+             subject rather than per size: the layout responds to what the
+             launcher gives it, so one picker entry covers every size it can be
+             dragged to. -->
+        <receiver
+            android:name=".widget.StepsWidget"
+            android:label="@string/widget_steps_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/steps_widget_info" />
+        </receiver>
+
+        <!-- Heart rate, which is the one reading that moves while you sit still
+             and therefore the only widget whose refresh visibly does something. -->
+        <receiver
+            android:name=".widget.HeartWidget"
+            android:label="@string/widget_heart_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/heart_widget_info" />
+        </receiver>
+
+        <!-- A session in progress: the one card about something happening now
+             rather than a day already lived, and the only one with no refresh
+             control, because it has nothing a press could fetch. -->
+        <receiver
+            android:name=".widget.SessionWidget"
+            android:label="@string/widget_session_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/session_widget_info" />
+        </receiver>
+
+        <!-- Sleep, which is the one subject where more height genuinely buys
+             more of the night rather than a bigger version of the same
+             reading. -->
+        <receiver
+            android:name=".widget.SleepWidget"
+            android:label="@string/widget_sleep_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/sleep_widget_info" />
+        </receiver>
     </application>
 
     <!-- Permissions -->

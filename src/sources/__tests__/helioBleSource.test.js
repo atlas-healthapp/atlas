@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normaliseWorkouts } from "@/sources/helioBleSource";
+import { normaliseWorkouts, normaliseSamples } from "@/sources/helioBleSource";
 
 describe("normaliseWorkouts", () => {
   const raw = (overrides = {}) => ({
@@ -48,5 +48,46 @@ describe("normaliseWorkouts", () => {
   it("returns an empty array for no input", () => {
     expect(normaliseWorkouts(undefined)).toEqual([]);
     expect(normaliseWorkouts([])).toEqual([]);
+  });
+});
+
+describe("normaliseSamples", () => {
+  const hrv = (t, v = 90) => ({ metric: "hrv", t, v });
+  const now = Date.now();
+
+  it("keeps an ordinary reading", () => {
+    expect(normaliseSamples([hrv(now - 3600_000)])).toHaveLength(1);
+  });
+
+  it("drops a reading dated before this app could have taken it", () => {
+    // Real: the archive held 155 hrv samples dated 1973 to 2106, with ordinary
+    // values, which froze 75 rollup rows for dates that do not exist. One in
+    // eight hundred, so nothing on screen was visibly wrong - and permanent,
+    // because putSamples is keyed on [metric, t] and a wrong timestamp writes a
+    // new row rather than correcting one.
+    expect(normaliseSamples([hrv(Date.parse("1973-03-11T00:00:00Z"))])).toEqual([]);
+    expect(normaliseSamples([hrv(Date.parse("2106-02-07T00:00:00Z"))])).toEqual([]);
+  });
+
+  it("allows a day of clock skew between the phone and the band", () => {
+    // The two do not agree to the second, and a reading an hour "in the future"
+    // is a clock difference rather than a bad decode.
+    expect(normaliseSamples([hrv(now + 3600_000)])).toHaveLength(1);
+    expect(normaliseSamples([hrv(now + 48 * 3600_000)])).toEqual([]);
+  });
+
+  it("judges the junk by its date, not by its value", () => {
+    // Measured on the real archive: the 155 bad samples carry ordinary-looking
+    // values, and on real dates HRV runs to a maximum of 200 with nothing at or
+    // above 250. So there is no value threshold to be had here, and inventing
+    // one would throw away readings to catch a fault that the timestamp already
+    // identifies exactly.
+    expect(normaliseSamples([hrv(now - 60_000, 200)])).toHaveLength(1);
+    expect(normaliseSamples([hrv(Date.parse("2105-09-08T00:00:00Z"), 255)])).toEqual([]);
+  });
+
+  it("survives rubbish", () => {
+    expect(normaliseSamples([null, {}, { metric: "hrv", t: NaN, v: 90 }])).toEqual([]);
+    expect(normaliseSamples(undefined)).toEqual([]);
   });
 });

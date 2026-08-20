@@ -66,8 +66,37 @@ export function dischargeSegments(readings, charges = []) {
   for (let i = 1; i < points.length; i++) {
     const rose = points[i].v - points[i - 1].v >= CHARGE_RISE;
     if (rose) {
+      // **A charge is one episode, however many readings it took.** This used to
+      // start a new segment at every rise, so a single charge that happened to be
+      // synced repeatedly became several: measured on the real archive on
+      // 2026-08-19, one charge from 20% to 99% arrived as the rises 36, 50, 56,
+      // 92, 93, 95, 97, 99 and was counted as eight charges with a near-zero
+      // "discharge" wedged between each pair. Those junk runs then fed the
+      // averaging as though they were real, which is what made the days-per-charge
+      // figure meaningless.
+      //
+      // So walk to the top of the climb and begin the discharge there.
+      //
+      // **Non-decreasing, not strictly rising**, and that distinction is a bug
+      // this was written with. A charge plateaus while it tops off: the real
+      // series reads 92, 93, 95, 97, 97, 97, 99. Stopping at the first equal pair
+      // put the peak at 97 and started the "discharge" there, which then rose to
+      // 99 inside its own run - a segment with a drop of minus two, reported as a
+      // discharge. Walking through the flat spots ends the charge where the
+      // battery actually stops climbing.
+      //
+      // It also disposes of the other half of the problem for free: a strap left
+      // plugged in at 99% reports 99 for an hour, and counting that hour as
+      // discharge would add time against no drop, inflating the estimate - which
+      // is the direction this figure was wrong in. Beginning at the LAST reading
+      // of the plateau starts the clock when the battery starts falling, which is
+      // when the discharge really began.
+      let peak = i;
+      while (peak + 1 < points.length && points[peak + 1].v >= points[peak].v) peak += 1;
+
       segments.push(run);
-      run = [points[i]];
+      run = [points[peak]];
+      i = peak;
       continue;
     }
     run.push(points[i]);
@@ -176,7 +205,23 @@ export function batteryLife(readings, charges = []) {
 
   const perSegmentDays = usable.map(daysFor);
   const mean = (list) => list.reduce((sum, v) => sum + v, 0) / list.length;
-  const days = mean(perSegmentDays);
+
+  // **Pooled, not a mean of ratios.** Averaging each run's own extrapolation
+  // gives a 16% run the same say as a 70% one, and the short run is the one
+  // whose figure is mostly extrapolation: at MIN_SEGMENT_DROP it is multiplied
+  // by more than six before it is averaged in. Adding the evidence up first and
+  // dividing once weights every run by how much of a discharge it actually
+  // watched, which is what makes a fortnight-long claim defensible at all.
+  //
+  // Reported as too high against the vendor's own 10-day figure, and this is the
+  // half of that which is arithmetic rather than physics. The other half is that
+  // a cell does not discharge linearly, so a run spent entirely in the flat
+  // middle of the curve still over-states the ends; nothing here can fix that,
+  // which is why `basisDrop` is published for the panel to qualify the number
+  // with rather than leaving it to be read as a spec.
+  const totalHours = usable.reduce((sum, seg) => sum + seg.hours, 0);
+  const totalDrop = usable.reduce((sum, seg) => sum + seg.drop, 0);
+  const days = (totalHours / totalDrop) * 100 / 24;
 
   const earlier = perSegmentDays.slice(0, -1);
   const latest = perSegmentDays.at(-1);
@@ -189,6 +234,10 @@ export function batteryLife(readings, charges = []) {
     state: "ready",
     days,
     basis: usable.length,
+    // How much discharge the figure is actually built on, so a screen can say
+    // "from 46% of discharge" rather than presenting an extrapolation as a
+    // measurement.
+    basisDrop: totalDrop,
     fromCurrentRun: false,
     segments: segments.length,
     usable: usable.length,
@@ -206,6 +255,16 @@ export function batteryLife(readings, charges = []) {
  * interval produces a single number and there is nothing to compare it against.
  * It reports **percent per sync** so that changing the interval later gives
  * something to compare, and says so rather than implying a cause.
+ */
+/**
+ * **Nothing renders this, and it is kept on purpose** (2026-08-18). The panel
+ * showed "about 0.1% per sync, measured" and it was dropped: the figure was
+ * honest and unusable, being well inside the noise of a percentage that moves in
+ * whole points, and nobody decides anything from it.
+ *
+ * It survives because it answers a question that IS open - whether syncing every
+ * thirty minutes is what puts the strap's measured life above the vendor's own
+ * figure. That is the test for that ticket, not a display.
  */
 export function drainPerSync(readings, charges = [], intervalMinutes = 30) {
   // Measurable rather than usable: this is a rate per sync, not a claim about

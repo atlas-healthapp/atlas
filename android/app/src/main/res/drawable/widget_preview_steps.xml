@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shape of a day's steps, for the picker alone. Overwritten on the first
+     draw. Cumulative, so the flat stretches are sitting still and the climbs
+     are walks - which is the whole reason steps get a chart rather than a
+     second copy of the number above it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="34dp"
+    android:viewportWidth="200"
+    android:viewportHeight="34">
+    <path
+        android:pathData="M4,32 L30,32 L44,27 L58,26 L72,17 L96,16 L110,11 L132,10 L150,6 L172,5 L196,3 L196,34 L4,34 Z"
+        android:fillColor="@color/widget_activity"
+        android:fillAlpha="0.18" />
+    <path
+        android:pathData="M4,32 L30,32 L44,27 L58,26 L72,17 L96,16 L110,11 L132,10 L150,6 L172,5 L196,3"
+        android:strokeColor="@color/widget_activity"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

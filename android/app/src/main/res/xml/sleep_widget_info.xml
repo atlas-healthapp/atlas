@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Four columns by two rows to start, resizable both ways. One provider for
+     the subject, with the depth responding to the size it is given: dragged
+     taller it adds the stage rows and the week rather than stretching what was
+     already there.
+
+     maxResizeHeight is deliberately generous. The first widget shipped with a
+     minHeight it could not be dragged below, which was reported as a sizing
+     complaint before anything about the drawing was. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="80dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="60dp"
+    android:maxResizeHeight="420dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_sleep"
+    android:previewLayout="@layout/widget_sleep"
+    android:description="@string/widget_sleep_description"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

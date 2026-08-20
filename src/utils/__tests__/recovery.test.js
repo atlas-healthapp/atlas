@@ -285,6 +285,17 @@ describe("computeRecovery", () => {
     expect(result.score).toBeNull();
   });
 
+  it("refuses to score a day whose vitals have not been read yet", () => {
+    // Reported from the phone at 10:22 on 2026-08-19. The app opened, printed
+    // 75 GOOD with "5 points to GREAT" while BODY said NO READINGS YET, then
+    // dropped to 54 NORMAL when the sync landed. Both terms that carry 75 of
+    // the 100 points were missing, so the whole weight sat on last night's
+    // sleep and the app published a sleep score under Recovery's name.
+    const result = ready({ hrv: null, restingHr: null, sleep: 8.1 });
+    expect(result.state).toBe("awaiting-readings");
+    expect(result.score).toBeNull();
+  });
+
   it("still scores a finished day that is only missing its HRV", () => {
     // The distinction the gate turns on. A day with sleep behind it is a day
     // that can be scored, and withholding HRV and redistributing its weight is

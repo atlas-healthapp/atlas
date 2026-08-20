@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Seven nights of sleep scores, for the picker alone. Overwritten on the
+     first draw. Banded like the real thing, with the last night at full
+     strength and the week behind it dimmed - see Spark.bars. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="46dp"
+    android:viewportWidth="200"
+    android:viewportHeight="46">
+    <path android:pathData="M5,18 L23,18 L23,46 L5,46 Z"
+        android:fillColor="@color/widget_rec_normal" android:fillAlpha="0.7" />
+    <path android:pathData="M34,19 L52,19 L52,46 L34,46 Z"
+        android:fillColor="@color/widget_rec_normal" android:fillAlpha="0.7" />
+    <path android:pathData="M62,8 L80,8 L80,46 L62,46 Z"
+        android:fillColor="@color/widget_rec_good" android:fillAlpha="0.7" />
+    <path android:pathData="M91,4 L109,4 L109,46 L91,46 Z"
+        android:fillColor="@color/widget_rec_great" android:fillAlpha="0.7" />
+    <path android:pathData="M119,8 L137,8 L137,46 L119,46 Z"
+        android:fillColor="@color/widget_rec_good" android:fillAlpha="0.7" />
+    <path android:pathData="M148,15 L166,15 L166,46 L148,46 Z"
+        android:fillColor="@color/widget_rec_normal" android:fillAlpha="0.7" />
+    <path android:pathData="M176,5 L194,5 L194,46 L176,46 Z"
+        android:fillColor="@color/widget_rec_great" />
+</vector>

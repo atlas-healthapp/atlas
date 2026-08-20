@@ -46,7 +46,20 @@ function applyStatusBar(id) {
 function syncNativeTheme(id) {
   if (!Capacitor.isNativePlatform()) return;
   import("@capacitor/preferences").then(({ Preferences }) => {
-    Preferences.set({ key: "atlas_theme_native", value: id }).catch(() => {});
+    Preferences.set({ key: "atlas_theme_native", value: id })
+      .then(() => {
+        // **The widgets follow this theme too** (2026-08-19), and unlike the
+        // launch background they are on screen right now: a card left in the
+        // old palette while the app changed under it is the disagreement this
+        // key exists to prevent. `refreshNotification` redraws every placed
+        // widget as well as the shade, so one poke covers both.
+        import("@capacitor/core").then(({ registerPlugin }) => {
+          registerPlugin("HelioBle")
+            .refreshNotification()
+            .catch(() => {});
+        });
+      })
+      .catch(() => {});
   });
 }
 

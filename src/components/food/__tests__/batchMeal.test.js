@@ -45,13 +45,28 @@ const RICE = {
 };
 
 describe("entryFromScan", () => {
-  it("takes a per-serving scan at one of whatever the pack calls a serving", () => {
+  it("takes a per-serving scan as one serving, and puts what that weighs in the portion", () => {
+    // **Changed deliberately 2026-08-18.** This used to assert `baseUnit` was
+    // "95 g", because the scan's free-text serving description was assigned
+    // straight to the unit. A real library collected 23 such "units" that way -
+    // `11 chips (27 g)`, `1 portion (13 g)`, `60.0g` - and the old name for this
+    // test said the quiet part out loud: "whatever the pack calls a serving".
+    // The unit is the noun a quantity counts; what one weighs is a portion.
     const entry = entryFromScan(TUNA);
     expect(entry.itemId).toBe(null);
     expect(entry.baseAmount).toBe(1);
-    expect(entry.baseUnit).toBe("95 g");
+    expect(entry.baseUnit).toBe("serving");
+    expect(entry.portion).toEqual({ amount: 95, unit: "g" });
     expect(entry.quantity).toBe(1);
     expect(entry.useScanned).toBe(true);
+  });
+
+  it("leaves the portion unset when the pack's description cannot be read", () => {
+    // A wrong portion multiplies every macro shown for the item, so prose that
+    // does not parse is dropped rather than kept.
+    const entry = entryFromScan({ ...TUNA, servingSize: "1 tin" });
+    expect(entry.baseUnit).toBe("serving");
+    expect(entry.portion).toBe(null);
   });
 
   it("takes a per-100g scan as 100 g, since that is what the figures describe", () => {
@@ -199,10 +214,12 @@ describe("scaling and totals", () => {
 });
 
 describe("amounts and stepping", () => {
-  it("prints a bare unit as a count and a unit carrying its own amount as a multiplier", () => {
+  it("prints a bare unit as a count, and a serving with what one of them weighs", () => {
     expect(entryAmount(entryFromScan(RICE))).toBe("100 G");
-    // "95 g" already says how much one is, so a leading count would read "1 95 G".
-    expect(entryAmount(entryFromScan(TUNA))).toBe("95 g".toUpperCase());
+    // Was "95 G", from a unit literally named "95 g". Now the weight lives in the
+    // portion, which is the field that exists to answer "one serving of what?" -
+    // so the amount reads as a count and still says how much that is.
+    expect(entryAmount(entryFromScan(TUNA))).toBe("1 SERVING (95 G)");
   });
 
   it("steps grams by ten and servings by a half", () => {
@@ -233,7 +250,7 @@ describe("mergeScan", () => {
 
   it("leaves the row it did not touch alone, and keeps the order scanned", () => {
     const list = mergeScan(mergeScan([], entryFromScan(TUNA)), entryFromScan(RICE));
-    expect(list.map((e) => e.baseUnit)).toEqual(["95 g", "g"]);
+    expect(list.map((e) => e.baseUnit)).toEqual(["serving", "g"]);
     const bumped = mergeScan(list, entryFromScan(TUNA));
     expect(bumped.map((e) => e.quantity)).toEqual([2, 100]);
   });

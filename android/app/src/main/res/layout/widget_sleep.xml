@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sleep, one subject at three depths. The size decides how much of the night
+     is drawn, and every depth answers the question the one below it raised:
+     how long, then what it was made of, then how that compares with the week.
+
+     Everything past the composition bar is GONE until the launcher gives the
+     card the height for it, so a short card is a short card rather than a tall
+     one with its bottom half cut off.
+
+     No negative margins anywhere. One of those put the refresh target outside
+     its parent row on the first widget and Android delivered nothing to it. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/sleep_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <TextView
+            android:id="@+id/sleep_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sleep_label" />
+
+        <!-- Weighted spacers either side of the wordmark, because it has to sit
+             in the MIDDLE of the header rather than beside the metric. Equal
+             weights are what centre it: placed between two things of different
+             widths it lands wherever their difference puts it. TextView rather
+             than Space, since a plain View is not on the RemoteViews inflatable
+             whitelist and a service posting one gets killed for it. -->
+        <TextView
+            android:id="@+id/sleep_gap_a"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no" />
+
+        <!-- The mark set flush against a word is read as a letter of it, and
+             this is the widget where that actually bites: the mark beside this
+             metric reads as the word ASLEEP. Centred, never adjacent. -->
+        <TextView
+            android:id="@+id/sleep_mark"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_wordmark"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/sleep_gap_b"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no" />
+
+        <ImageView
+            android:id="@+id/sleep_refresh"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:padding="8dp"
+            android:src="@drawable/ic_widget_refresh"
+            android:contentDescription="@string/widget_refresh" />
+
+        <ProgressBar
+            android:id="@+id/sleep_spinner"
+            style="?android:attr/progressBarStyleSmall"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:padding="8dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/widget_body"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- How long, which is the whole of the smallest size. The score rides
+         beside it rather than above it: ours is the only sleep score in Atlas
+         since the band's came off every screen on 2026-08-07, so there is no
+         second number here asking which to believe. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="true">
+
+        <TextView
+            android:id="@+id/sleep_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:includeFontPadding="false"
+            android:textColor="@color/widget_ink"
+            android:text="@string/widget_sample_sleep" />
+
+        <TextView
+            android:id="@+id/sleep_score"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.12"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_score"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/sleep_stagebar"
+        android:layout_width="match_parent"
+        android:layout_height="8dp"
+        android:layout_marginTop="8dp"
+        android:scaleType="fitXY"
+        android:importantForAccessibility="no"
+        android:src="@drawable/widget_preview_stagebar" />
+
+    <!-- When the night ran, and the two stages worth naming without a legend.
+         Deep and REM because those are the ones looked for; light is most of
+         every night and awake is the remainder. -->
+    <LinearLayout
+        android:id="@+id/sleep_facts"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:baselineAligned="true"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/sleep_window"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_window" />
+
+        <TextView
+            android:id="@+id/sleep_headline_stages"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="end"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_stages" />
+    </LinearLayout>
+
+    <!-- The tallest size only: every stage named, with its own minutes. Four
+         rows written out rather than a list, because RemoteViews cannot build
+         views at runtime and four is all there will ever be. Each row's bar is
+         a drawn bitmap for the same reason the composition bar is: a weight
+         known only at redraw cannot be expressed in a layout. -->
+    <LinearLayout
+        android:id="@+id/sleep_rows"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:baselineAligned="false">
+
+            <TextView
+                android:id="@+id/stage_name_1"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" />
+
+            <ImageView
+                android:id="@+id/stage_bar_1"
+                android:layout_width="0dp"
+                android:layout_height="6dp"
+                android:layout_weight="1"
+                android:layout_gravity="center_vertical"
+                android:scaleType="fitXY"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:id="@+id/stage_mins_1"
+                android:layout_width="44dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:maxLines="1"
+                android:gravity="end"
+                android:textColor="@color/widget_dim" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal"
+            android:baselineAligned="false">
+
+            <TextView
+                android:id="@+id/stage_name_2"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" />
+
+            <ImageView
+                android:id="@+id/stage_bar_2"
+                android:layout_width="0dp"
+                android:layout_height="6dp"
+                android:layout_weight="1"
+                android:layout_gravity="center_vertical"
+                android:scaleType="fitXY"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:id="@+id/stage_mins_2"
+                android:layout_width="44dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:maxLines="1"
+                android:gravity="end"
+                android:textColor="@color/widget_dim" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal"
+            android:baselineAligned="false">
+
+            <TextView
+                android:id="@+id/stage_name_3"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" />
+
+            <ImageView
+                android:id="@+id/stage_bar_3"
+                android:layout_width="0dp"
+                android:layout_height="6dp"
+                android:layout_weight="1"
+                android:layout_gravity="center_vertical"
+                android:scaleType="fitXY"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:id="@+id/stage_mins_3"
+                android:layout_width="44dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:maxLines="1"
+                android:gravity="end"
+                android:textColor="@color/widget_dim" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal"
+            android:baselineAligned="false">
+
+            <TextView
+                android:id="@+id/stage_name_4"
+                android:layout_width="52dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" />
+
+            <ImageView
+                android:id="@+id/stage_bar_4"
+                android:layout_width="0dp"
+                android:layout_height="6dp"
+                android:layout_weight="1"
+                android:layout_gravity="center_vertical"
+                android:scaleType="fitXY"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:id="@+id/stage_mins_4"
+                android:layout_width="44dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:maxLines="1"
+                android:gravity="end"
+                android:textColor="@color/widget_dim" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/sleep_week_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:fontFamily="monospace"
+        android:textSize="12sp"
+        android:letterSpacing="0.18"
+        android:maxLines="1"
+        android:textColor="@color/widget_dim"
+        android:text="@string/widget_last_seven"
+        android:visibility="gone" />
+
+    <!-- **The week takes the slack, and the filler takes it only when there is
+         no week.** Exactly one of the two is weighted at any size, which is what
+         keeps the sync stamp on the floor of the card without the columns
+         paying for it. Both halves of that were got wrong in one day: the week
+         alone carried the weight first, so on every size that draws no week -
+         most of them - nothing expanded and the stamp rode up under the hours;
+         pinning the week to a fixed height fixed the stamp and squashed the
+         columns, which was reported just as fast. -->
+    <ImageView
+        android:id="@+id/sleep_week"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="4dp"
+        android:scaleType="fitXY"
+        android:importantForAccessibility="no"
+        android:src="@drawable/widget_preview_bars"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/sleep_filler"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:importantForAccessibility="no" />
+
+    <!-- The stamp lives in the footer, which is what lets the wordmark be
+         centred at all: SYNCED 14:32 is far wider than SLEEP, so a mark placed
+         between them in the header could only ever sit left of centre. -->
+    
+    <!-- **The footer is one row with two ends.** The battery sits bottom left
+         and the sync stamp bottom right, because they answer one question
+         between them - is this reading current, and will the next one arrive -
+         and reading them as one run of text made the stamp harder to find. Equal
+         weights, so neither end moves when the other's string changes length. -->
+    <LinearLayout
+        android:id="@+id/sleep_footer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:baselineAligned="true"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/sleep_battery"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="start"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_battery" />
+
+        <TextView
+            android:id="@+id/sleep_synced"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="end"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_synced" />
+    </LinearLayout>
+</LinearLayout>

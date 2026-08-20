@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The collapsed shade while a session Atlas started is running.
+
+  **The clock is a Chronometer and that is the whole reason this layout exists.**
+  A notification's custom view is inflated by SystemUI, a different process, which
+  will only inflate the framework classes annotated @RemoteView. Chronometer is
+  one of them, and it counts up in SystemUI's own process from a base it is given,
+  so the elapsed time stays live with Atlas asleep and nothing waking once a
+  second to re-post. Publishing a duration instead would go stale between syncs,
+  which is exactly the number that must not.
+
+  The same whitelist is why the divider elsewhere in this app is an ImageView: a
+  plain <View> is not on it, and a foreground service posting a notification the
+  system cannot inflate is killed outright.
+
+  **Two columns, and each answers a different question.** Left is what and how
+  long; right is how hard and since when. The clock alone cannot say when you
+  started, which is the thing you check when you have forgotten - and forgetting
+  is the case this card exists for, since there is deliberately no auto-stop.
+
+  **Sized larger than the status notification it sits beside.** That one is a
+  line of figures you glance past; this is a live session, and at 10sp its
+  labels read as fine print on the one card you actually want to see from
+  across a desk.
+
+  Colours come from @color/notif_*, which resolve against values/ or values-night/
+  by the SHADE's night mode rather than by Atlas's own theme. Nothing here reads
+  atlas_theme_native.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/session_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:letterSpacing="0.13"
+            android:textAllCaps="true"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_dim"
+            android:text="Session" />
+
+        <!-- Sized like the figure on a widget card rather than like body text:
+             it is the one number this notification exists to show. -->
+        <Chronometer
+            android:id="@+id/session_clock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="28sp"
+            android:textColor="@color/notif_ink"
+            android:paddingTop="1dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="end">
+
+        <!-- "Started", not "since": it is the word somebody actually uses about
+             a session, and it reads as a fact rather than as a preposition
+             waiting for the rest of a sentence. -->
+        <TextView
+            android:id="@+id/session_started"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.1"
+            android:gravity="end"
+            android:maxLines="1"
+            android:textColor="@color/notif_dim"
+            android:text="Started 08:12" />
+
+
+        <!-- The live reading, when the screen has been on long enough for the
+             link to come up. Hidden entirely rather than showing a dash: a blank
+             right-hand column reads as "nothing to say here", and a dash reads as
+             a reading that failed. -->
+        <TextView
+            android:id="@+id/session_bpm"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="22sp"
+            android:gravity="end"
+            android:maxLines="1"
+            android:textColor="@color/notif_ink"
+            android:text="134 BPM" />
+
+        <!-- The zone, or how old the reading is once the stream has stopped. One
+             line for both, because they are never both worth saying: a live
+             figure needs its zone, and a stale one needs its age far more. -->
+        <TextView
+            android:id="@+id/session_zone"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:letterSpacing="0.12"
+            android:textAllCaps="true"
+            android:gravity="end"
+            android:maxLines="1"
+            android:textColor="@color/notif_dim"
+            android:text="Zone 3" />
+    </LinearLayout>
+</LinearLayout>

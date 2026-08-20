@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two columns by two rows, and resizable from there.
+
+     One provider per subject rather than one per size: Android picks the layout
+     from the size it is given, so SLEEP 2x2 and SLEEP 4x2 as separate entries
+     would be fifteen rows in the launcher's picker for five subjects, and a
+     widget can still be dragged to a size a fixed layout does not fit.
+
+     minHeight is deliberately small. The first widget declared 110dp and could
+     not be dragged shorter than two rows, because a launcher will not resize
+     below the declared minimum.
+
+     updatePeriodMillis is 0: this is pushed by the app and the sync service
+     rather than polling, and a poll would redraw from a summary nobody had
+     refreshed - which is exactly how a widget ends up disagreeing with the
+     screen it mirrors. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="80dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="80dp"
+    android:maxResizeWidth="320dp"
+    android:maxResizeHeight="220dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_steps"
+    android:previewLayout="@layout/widget_steps"
+    android:description="@string/widget_steps_description"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

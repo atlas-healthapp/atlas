@@ -33,23 +33,22 @@ import { currentStreak } from "@/utils/streak";
 // on the other. `homeModel.test.js` asserts the two lists still agree, because
 // nothing else would catch them drifting apart.
 export const VITALS = [
+  // **First, so it always sits directly under SLEEP.** Stress is the only vital
+  // with a row every day, and it used to sit fifth in this list, so its position
+  // moved down the card whenever another vital flagged - a row you look for
+  // daily should not move depending on what else happened. It is also the only
+  // one that moves DURING the day rather than settling overnight, which is why
+  // it never collapses into the summary line.
+  { key: "stress", label: "STRESS", unit: "", alwaysShown: true },
   { key: "hrv", label: "HRV", unit: "MS" },
   { key: "restingHr", label: "REST HR", unit: "BPM" },
   // The day's mean heart rate, which mixes a night at 50 with a session at 170.
-  // Included because it is one of the six and the count should be honest about
-  // what was measured, but it is the likeliest of them to flag on an ordinary
-  // training day: watch whether it earns its own row too often.
-  { key: "hr", label: "HEART RATE", unit: "BPM" },
+  // Counted, never surfaced - see `dayMean` below.
+  { key: "hr", label: "HEART RATE", unit: "BPM", dayMean: true },
   { key: "respRate", label: "RESP RATE", unit: "BRPM" },
-  // Always shown, unlike the others, which collapse into one line on an
-  // ordinary day. Stress is the only vital that moves during the day rather
-  // than being settled overnight, so it is a reading about right now in a way
-  // the others are not - and it is the only one with a page worth opening.
-  // Collapsing it meant it disappeared on exactly the ordinary days you would
-  // check it on.
-  { key: "stress", label: "STRESS", unit: "", alwaysShown: true },
+
   { key: "spo2", label: "SPO2", unit: "%" },
-  { key: "skinTemp", label: "SKIN TEMP", unit: "°C" },
+  { key: "skinTemp", label: "SKIN TEMP", unit: "°C", dayMean: true },
 ];
 
 /**
@@ -169,7 +168,12 @@ export function recentSleepScore({ entries, todayKey, nights = SLEEP_TERM_NIGHTS
  */
 export function recoveryFor(args) {
   const result = recoveryOn(args);
-  if (result.state !== "awaiting-night") return { ...result, forDate: args.todayKey };
+  // Two states step back a day, and they are the same case seen from two
+  // sides: the night has not happened yet, or the day's vitals have not been
+  // read off the strap yet. Either way the honest answer is the last day that
+  // could be scored, labelled with its own date.
+  const STEP_BACK = ["awaiting-night", "awaiting-readings"];
+  if (!STEP_BACK.includes(result.state)) return { ...result, forDate: args.todayKey };
 
   const previous = addDays(args.todayKey, -1);
   const back = recoveryOn({
@@ -276,11 +280,30 @@ export function bodyRows({ dayWindow, entry, todayKey, showAllVitals = false }) 
   const calibrating = measurable.filter((v) => !v.range);
   // A vital earns its own row by being unusual, or by being one that always
   // gets one.
+  // **A day mean never earns its own row, whichever way it went** (2026-08-19).
+  //
+  // `hr` and `skinTemp` are averages over whatever has happened so far today,
+  // judged against a range built from whole days. At 10am, after eight hours
+  // asleep, both are outside that range by construction: measured on the phone
+  // that morning, the mean heart rate read 56.6 BPM against recent days of 64 to
+  // 78, and skin temperature read high for the same reason - a night under a
+  // duvet. Reported as "it says my heart rate is low and that doesn't seem like
+  // something to be concerned about", which is exactly right.
+  //
+  // The same defect as resting HR being scoped to the calendar day, fixed on
+  // 2026-08-14: a window that does not match the quantity makes the comparison
+  // meaningless. Withheld rather than re-scoped, because unlike resting HR there
+  // is no window that makes a day mean a vital - it mixes a night at 50 with a
+  // session at 170 by design. Both keep their pages, where the day is drawn
+  // hour by hour and the shape is the point.
+  //
+  // They still count toward the "N NORMAL" tally: the reading was taken, and the
+  // count should say what was measured.
   const outside = measurable.filter(
     (v) =>
       v.alwaysShown ||
       showAllVitals ||
-      (v.range && (v.value < v.range.low || v.value > v.range.high))
+      (!v.dayMean && v.range && (v.value < v.range.low || v.value > v.range.high))
   );
 
   // Nothing recorded yet today. Say that once rather than three times.

@@ -92,6 +92,22 @@
         </button>
 
         <div class="sectionlabel mono">ACTIONS</div>
+
+        <!-- **Only for a quick add.** Those deliberately save nothing to the
+             library, because an item called "Tuesday in Bali" would pollute the
+             list you build meals from. But the ones worth keeping are only
+             obvious after the fact, which is why the way in is here, on the entry
+             you are looking at, rather than a decision at the moment you typed
+             the numbers. -->
+        <template v-if="isQuickAdd">
+          <button class="savelib mono" type="button" @click="$emit('save-to-library')">
+            SAVE TO LIBRARY
+          </button>
+          <div class="note mono">
+            COPIES THE NUMBERS INTO A NEW ITEM. THIS DAY'S RECORD IS NOT CHANGED.
+          </div>
+        </template>
+
         <button class="deletebtn mono" @click="$emit('delete')">
           {{ row.kind === "slot" ? "UNDO / UNLOG" : "DELETE" }}
         </button>
@@ -141,10 +157,20 @@ const emit = defineEmits([
   "remove-extra",
   "set-component",
   "remove-component",
+  "save-to-library",
 ]);
 useBackClose(() => emit("close"));
 
 const food = useFoodStore();
+
+/**
+ * A quick add: typed straight into the day, never joined to the library.
+ *
+ * Tested on `mealId` rather than only on the `adHoc` flag, because an entry whose
+ * library item has since been deleted also has nothing to reuse, and offering to
+ * save that is the same favour.
+ */
+const isQuickAdd = computed(() => props.row.kind !== "slot" && !props.row.mealId);
 
 const libraryItem = computed(() =>
   props.row.mealId ? food.itemById(props.row.mealId) : null
@@ -435,6 +461,18 @@ const otherTypes = computed(() =>
   line-height: 1.6;
   letter-spacing: 0.8px;
   color: var(--dim);
+}
+/* The family colour, not the danger colour: this one keeps something. Same
+   metrics as the delete button below so the two read as one stack of actions. */
+.savelib {
+  width: 100%;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--fam-intake);
+  border: 1px solid color-mix(in srgb, var(--fam-intake) 45%, transparent);
+  padding: 10px 0;
+  margin-bottom: 6px;
 }
 .deletebtn {
   width: 100%;

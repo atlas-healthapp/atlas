@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Four columns by two rows. Wide enough for three metrics side by side
+     without the 22sp figures truncating, which is the smallest this can be and
+     still be read at a glance rather than squinted at.
+
+     minHeight was 110dp, which is why it could not be dragged shorter than two
+     rows: a launcher will not resize below the declared minimum. It is 40dp now,
+     one row, and the provider swaps to a compact layout at that size rather than
+     stretching the tall one and leaving dead space under it.
+
+     updatePeriodMillis is 0 on purpose. Android will not honour anything under
+     30 minutes anyway, and this widget is pushed by the app and the sync service
+     rather than polling. A poll would also redraw from a summary nobody had
+     refreshed, which is exactly how a widget ends up disagreeing with the screen
+     it mirrors. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="40dp"
+    android:maxResizeHeight="220dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_readout"
+    android:previewLayout="@layout/widget_readout"
+    android:description="@string/widget_description"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

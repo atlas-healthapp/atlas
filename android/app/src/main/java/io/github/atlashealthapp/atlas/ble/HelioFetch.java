@@ -61,6 +61,46 @@ final class HelioFetch {
     private static final long MINUTE_MS = 60_000L;
 
     /**
+     * The bounds a heart-rate byte has to fall inside to be a reading at all.
+     *
+     * <p><b>These are the Java twin of {@code HR_MIN} / {@code HR_MAX} in
+     * {@code src/utils/bodyMetrics.js} and the two must agree.</b> Unlike the
+     * other change-both-or-neither pairs in this codebase, this one <i>is</i>
+     * checked: {@code src/utils/__tests__/hrBoundsTwin.test.js} reads this file
+     * and fails if the numbers drift, the way {@code families.test.js} reads
+     * {@code style.css}.
+     *
+     * <p>Named {@code HR_PLAUSIBLE_*} because {@code HR_MIN} and {@code HR_MAX}
+     * were already taken further down this file, by the protobuf field numbers of
+     * a workout summary's own minimum and maximum heart rate. Two different
+     * things with one obvious name, and the compiler caught it.
+     *
+     * <p><b>Why this exists at all (2026-08-19).</b> The band writes {@code 0xff}
+     * into the heart-rate byte for a minute it has no reading for, exactly as it
+     * does for stress three cases below. The stress guard was written and the
+     * heart-rate one was not, so a strap sitting on its charger emitted a run of
+     * 255s that were carried into the widgets as a real pulse. The app never
+     * showed it, because {@code isMeaningful} drops them on ingest, which is what
+     * made it look like a widget bug: the card read 255 BPM, opening Atlas
+     * corrected it, and the next background sync put it back. Measured on the
+     * device, the archive held 4,179 heart-rate samples over three days with a
+     * maximum of 165 and not one 255, so the leak was never in the archive.
+     *
+     * <p>Dropping it here rather than in the service is deliberate: the sentinel
+     * is protocol knowledge and this is where the bytes are, which is the same
+     * reasoning the temperature scaling below carries. Both consumers, the app's
+     * ingest and the widgets' carry-forward, then inherit one definition instead
+     * of keeping two that can drift.
+     */
+    private static final int HR_PLAUSIBLE_MIN = 25;
+    private static final int HR_PLAUSIBLE_MAX = 200;
+
+    /** Whether a raw heart-rate byte is a reading rather than the band's "none". */
+    public static boolean isRealHeartRate(final double bpm) {
+        return bpm >= HR_PLAUSIBLE_MIN && bpm <= HR_PLAUSIBLE_MAX;
+    }
+
+    /**
      * Record sizes and codes verified against Gadgetbridge's fetch operations.
      * A wrong size here does not throw: it silently reinterprets every field,
      * which is why each is stated once and used everywhere.
@@ -498,7 +538,16 @@ final class HelioFetch {
                     final int steps = data[base + 2] & 0xff;
                     final int hr = data[base + 3] & 0xff;
                     samples.add(new Sample("steps", impliedTime, steps));
-                    samples.add(new Sample("hr", impliedTime, hr));
+                    // 0xff is the band's "no reading this minute" marker, not a
+                    // value, and a charging strap sends runs of them. See
+                    // isRealHeartRate. Steps are deliberately not filtered the
+                    // same way: measured on the device, three days of step
+                    // samples top out at 112, so the band does not appear to
+                    // mark an absent step count the same way, and dropping 255
+                    // there would throw away a real, if unlikely, minute.
+                    if (isRealHeartRate(hr)) {
+                        samples.add(new Sample("hr", impliedTime, hr));
+                    }
                     break;
                 }
                 case STRESS: {
@@ -523,7 +572,13 @@ final class HelioFetch {
                 }
                 case RESTING_HR: {
                     final long t = unsignedInt(buf.getInt(base)) * 1000L;
-                    samples.add(new Sample("restingHr", t, data[base + 5] & 0xff));
+                    // Same sentinel, same reason: this is a heart rate too, and a
+                    // day the band never got a resting reading for is reported
+                    // rather than omitted.
+                    final int resting = data[base + 5] & 0xff;
+                    if (isRealHeartRate(resting)) {
+                        samples.add(new Sample("restingHr", t, resting));
+                    }
                     break;
                 }
                 case HRV: {

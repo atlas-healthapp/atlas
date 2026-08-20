@@ -78,6 +78,12 @@ export function dialFor(key, v) {
         color: v.recoveryColor,
         inkColor: v.recoveryInk,
         glow: v.recoveryBand === "GREAT",
+        // **The sub-line is for the widget, not for Home.** Home's ring has the
+        // band in the card below it and a page one tap away; a widget has
+        // neither, so a bare 54 there says nothing about whether 54 is a good
+        // morning. Home ignores it, which is why it is computed here rather
+        // than assembled in Java: the widget renders and the app computes.
+        sub: v.recoveryBand ?? null,
         opens: "recovery",
       };
     case "sleep":
@@ -87,6 +93,9 @@ export function dialFor(key, v) {
         pct: v.sleepPct ?? 0,
         text: v.sleepText,
         color: colorFor("sleep"),
+        // The hours, because the figure above is the score. Whichever of the two
+        // is not leading is the one worth saying underneath.
+        sub: v.sleepHoursText ?? null,
         opens: "sleep",
       };
     case "routine":
@@ -110,6 +119,9 @@ export function dialFor(key, v) {
         pct: pct(value, goal),
         text: v.texts?.[key] ?? (value == null ? "--" : String(Math.round(value))),
         color: colorFor(key),
+        // "OF 160G", formatted by the registry rather than here, so the widget
+        // cannot print a unit the rest of the app does not use.
+        sub: v.subs?.[key] ?? null,
         // Food metrics open the diary, everything else its own metric page.
         opens: ["calories", "protein", "fibre"].includes(key) ? "food" : "metric",
       };

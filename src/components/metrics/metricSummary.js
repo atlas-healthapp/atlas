@@ -105,3 +105,29 @@ export function deviationBars(values, baseline) {
   );
   return days.map((v) => (v == null ? null : (v - baseline) / widest));
 }
+
+/**
+ * How a goal metric has gone over a stretch of days.
+ *
+ * Asked for as "my weekly average, and how successful I am, and 30 days too".
+ * Separate from `goalSummary` above, which describes the charted window: these
+ * periods are fixed lengths that do not move with `def.window`, so protein can
+ * report 30 days while its chart stays at the 14 the metric is read over.
+ *
+ * **A period with no readings returns null rather than zeros.** An average of
+ * nothing is not 0g, and a met rate of 0 of 0 reads as total failure.
+ *
+ * @param values oldest to newest, nulls for days with no reading
+ */
+export function periodStats(values, goal) {
+  const recorded = (values ?? []).filter((v) => v != null);
+  if (!recorded.length) return null;
+  const average = recorded.reduce((a, b) => a + b, 0) / recorded.length;
+  return {
+    average,
+    recorded: recorded.length,
+    // Withheld rather than zero when the goal is switched off: a met count
+    // against no target is a count of nothing.
+    met: goal ? recorded.filter((v) => v >= goal).length : null,
+  };
+}

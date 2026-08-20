@@ -105,6 +105,32 @@ describe("helio sync lifecycle", () => {
     expect(plugin.connect.mock.calls[0][0].sinceDays).toBe(1);
   });
 
+  it("lets a deep fetch past the rate limit, which the service could otherwise starve for good", async () => {
+    // The limit is measured against `lastSyncAt`, and the background service
+    // moves that too - through its own runs and through every drain. So on a
+    // phone whose service is running, a bumped DEEP_FETCH_VERSION could sit
+    // unfetched indefinitely: an hour of trail lines all reading
+    // `declined: synced Ns ago`, and only a pull-to-refresh breaking out.
+    localStorage.setItem("atlas_helio_connected", "true");
+    localStorage.setItem("atlas_helio_last_sync", String(Date.now()));
+    const store = useHelioStore();
+    store.setAuthKey(AUTH_KEY);
+    plugin.drainCache.mockResolvedValue({ samples: [], sessions: [], workouts: [] });
+    plugin.connect.mockImplementation(async () => {
+      queueMicrotask(() => emit({ event: "fetchComplete" }));
+    });
+
+    // Synced seconds ago, and it goes anyway, because the deep fetch is owed.
+    await store.refresh({ trigger: "test" });
+    expect(plugin.connect).toHaveBeenCalled();
+
+    // And the exemption is only that: with the deep fetch done, the limit is
+    // back and a resume seconds later still declines.
+    plugin.connect.mockClear();
+    expect(await store.refresh({ trigger: "test" })).toBe("SYNCED IN THE LAST TEN MINUTES");
+    expect(plugin.connect).not.toHaveBeenCalled();
+  });
+
   it("leaves the deep fetch owed when it never completed", async () => {
     const store = useHelioStore();
     store.setAuthKey(AUTH_KEY);
@@ -391,7 +417,7 @@ describe("helio refresh", () => {
     await store.refresh();
     vi.clearAllMocks();
 
-    expect(await store.refresh()).toMatch(/LAST FIVE MINUTES/);
+    expect(await store.refresh()).toMatch(/LAST TEN MINUTES/);
     expect(plugin.connect).not.toHaveBeenCalled();
   });
 
@@ -447,5 +473,39 @@ describe("helio refresh", () => {
     const declined = [a, b, c].filter((r) => /ALREADY RUNNING/.test(r ?? ""));
     expect(declined).toHaveLength(2);
     expect(plugin.connect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The widget's refresh is the SERVICE's sync, and the app has its own clock. If
+// the app judges staleness before draining, it never learns that a sync just
+// happened and syncs again the moment it is opened.
+describe("the app's rate limit and the service's clock", () => {
+  it("counts a background sync as a sync, not as silence", async () => {
+    // Reported 2026-08-19: press a widget's refresh, wait as long as you like,
+    // open Atlas, and it starts syncing again every single time. The service had
+    // synced; only `drainBackground` folds its stamp into `lastSyncAt`, and the
+    // age was measured before the drain ran.
+    const store = useHelioStore();
+    store.connected = true;
+    store.lastSyncAt = Date.now() - 60 * 60 * 1000;
+
+    // The service talked to the strap a moment ago and brought nothing back,
+    // which is the case that used to be invisible.
+    plugin.drainCache.mockResolvedValueOnce({
+      samples: [],
+      sessions: [],
+      workouts: [],
+      serviceSyncedAt: Date.now() - 30 * 1000,
+    });
+
+    // Counted as a delta, because the plugin mock is shared with every other
+    // test in this file.
+    const before = plugin.connect.mock.calls.length;
+    const reason = await store.refresh({ trigger: "test-resume" });
+
+    expect(reason).toMatch(/LAST TEN MINUTES/);
+    // The strap is never opened, which is the whole point: the sync this would
+    // have run has already happened in the background, from the widget's button.
+    expect(plugin.connect.mock.calls.length).toBe(before);
   });
 });

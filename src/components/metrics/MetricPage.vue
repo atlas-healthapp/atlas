@@ -154,11 +154,29 @@
 
         <div class="grouphd mono" :style="{ color: colour }">HISTORY</div>
 
+        <!-- **Below the divider, because an average of the last 7 or 30 days is
+             not about today**, and this page's shape is today first, then
+             HISTORY, then everything multi-day. It is also why these did not go
+             in the pairs at the top: that grid holds two facts by design, a
+             third leaves a hole in it, and neither of these is a fact about
+             today anyway.
+
+             The periods are fixed rather than following `def.window`, so protein
+             can report 30 days while its chart stays at the 14 days the metric
+             is actually read over. -->
+        <div v-if="periods.length" class="periods">
+          <div v-for="p in periods" :key="p.label" class="period">
+            <span class="plabel mono">{{ p.label }}</span>
+            <span class="pvalue mono">{{ p.value }}</span>
+            <span v-if="p.sub" class="psub mono">{{ p.sub }}</span>
+          </div>
+        </div>
+
         <HomeCard title="DAY BY DAY" :meta="chartMeta" :color="colour">
           <!-- What the tapped day was. Defaults to the most recent reading, so
                the line always says something and tapping moves it rather than
                revealing it: an empty readout would be a caption asking to be
-               used. Same interaction as the sleep page's WHEN YOU SLEPT. -->
+               used. Same interaction as the sleep page's SLEEP WINDOW. -->
           <div v-if="tapped" class="readout mono">
             <span>{{ tapped.label }}</span>
             <span class="rv">{{ tapped.value }}<em v-if="tapped.note"> · {{ tapped.note }}</em></span>
@@ -199,6 +217,26 @@
               :x2="CHART_W"
               :y2="bar.targetY"
               class="target"
+            />
+            <!-- **A day with no reading at all**, drawn before the bars so a bar
+                 always wins its slot. Nothing was drawn for these, so ten missing
+                 creatine days in a month looked the same as a month of short
+                 bars, and the reader cannot tell a gap in the data from a gap in
+                 the habit. Fixed height on the baseline, so it can never be
+                 mistaken for a very small value.
+
+                 Deliberately not the same treatment as a recorded zero, which is
+                 something you know: that keeps its 0.55 bar, per the note below. -->
+            <rect
+              v-for="g in bar.gaps"
+              :key="'gap' + g.i"
+              :x="g.x"
+              :y="g.y"
+              :width="g.w"
+              :height="g.h"
+              rx="1"
+              fill="var(--dim)"
+              fill-opacity="0.3"
             />
             <!-- A missed day comes up to 0.55, not 0.34. At a third opacity it
                  read as a day with nothing logged, and this codebase keeps
@@ -528,6 +566,7 @@ import { formatValue } from "@/utils/metricRegistry";
 import {
   isGoalMetric,
   goalSummary,
+  periodStats,
   trendSummary,
   deviationBars,
 } from "./metricSummary";
@@ -974,6 +1013,51 @@ const facts = computed(() => {
   return out;
 });
 
+/**
+ * The 7 and 30 day view of a goal metric, for the strip under HISTORY.
+ *
+ * Read straight from `valueOn` rather than from `series`, which is trimmed to
+ * `def.window` - protein's window is 14 days, and a 30-day average taken from it
+ * would silently be a 14-day one wearing the wrong label.
+ *
+ * Only for goal metrics. A metric judged against your own baseline already
+ * answers "how am I doing" with its usual range, and an average of a baseline is
+ * a baseline.
+ */
+const periods = computed(() => {
+  if (!isGoal.value) return [];
+  const to = today();
+  const out = [];
+  for (const days of [7, 30]) {
+    const values = [];
+    for (let i = days - 1; i >= 0; i -= 1) values.push(valueOn(addDays(to, -i)));
+    const s = periodStats(values, props.def.goal);
+    if (!s) continue;
+    // **Dropped when the longer period holds nothing the shorter one did not.**
+    // Early on, 30 days contains the same handful of readings as 7, so the two
+    // cells print the same number twice and the second one implies a month of
+    // history that does not exist.
+    if (out.length && s.recorded === out[out.length - 1].recorded) continue;
+    out.push({
+      recorded: s.recorded,
+      // **The word "average" is on it.** Reported: "both should say average".
+      // "LAST 7 DAYS" over a number is a heading, not a claim, and the reader
+      // has to infer which of several possible figures it is.
+      label: `${days} DAY AVERAGE`,
+      value: display(Math.round(s.average * 10) / 10),
+      // Counted against the days that HAVE a reading, never the length of the
+      // period: "12 of 30" would count days you never recorded as days you
+      // failed. Saying "of N days recorded" out loud answers the question this
+      // raised - whether a short count is a missing column or missing days.
+      sub:
+        s.met == null
+          ? `${s.recorded} ${s.recorded === 1 ? "DAY" : "DAYS"} RECORDED`
+          : `MET ON ${s.met} OF ${s.recorded} RECORDED`,
+    });
+  }
+  return out;
+});
+
 /** The readings before today, which the range mark scales its axis to. */
 const priorReadings = computed(() => series.value.slice(0, -1).filter((v) => v != null));
 
@@ -1239,6 +1323,39 @@ function save(dateKey) {
 /* Two cells divided by a single vertical hairline. Horizontal rules are what
    this page is already full of: the mark's axis, the chart's target line, the
    card edges. A vertical one cannot be mistaken for any of them. */
+/* A row, not the two-column `.pairs` grid above: these are three-ish equal
+   facts of the same kind, where the pairs are two different kinds of fact about
+   today. Scrolls rather than wraps if a long unit ever makes them too wide. */
+.periods {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.period {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 13px;
+  background: var(--panel);
+  border-radius: 10px;
+}
+.plabel {
+  font-size: 9.5px;
+  letter-spacing: 1.4px;
+  color: var(--dim);
+}
+.pvalue {
+  font-size: 17px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.psub {
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: var(--dim);
+}
 .pairs {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

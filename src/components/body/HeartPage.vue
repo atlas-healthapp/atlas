@@ -297,6 +297,7 @@ import { useTripLane } from "@/composables/useTripLane";
 import { useSessionsStore } from "@/stores/sessions";
 import { resolveSessions } from "@/components/activity/resolveSessions";
 import { getSamples, getWorkouts } from "@/utils/sampleDb";
+import { dailyValuesForRange } from "@/utils/dailyRollup";
 import { today, addDays, fmtAxisDate as axisDate } from "@/utils/date";
 import { METRICS } from "@/utils/metricRegistry";
 import { heartDayGeometry } from "./heartDay";
@@ -380,6 +381,23 @@ const dayFromWindow = computed(() => {
   return historySamples.value.filter((s) => s.t >= dayStart.value && s.t < dayEnd.value);
 });
 
+/**
+ * The night-scoped resting rate for the day being viewed, from the archive.
+ *
+ * Read as a rollup rather than recomputed: `rollupsForDate` already scopes it to
+ * the sleep window, and a second definition here is the drift this page was just
+ * found to have.
+ */
+const restingForDay = ref(null);
+async function loadResting() {
+  try {
+    const rows = await dailyValuesForRange(viewDate.value, viewDate.value);
+    restingForDay.value = rows?.[0]?.values?.restingHr ?? null;
+  } catch {
+    restingForDay.value = null;
+  }
+}
+
 async function load() {
   const inHand = dayFromWindow.value;
   if (inHand) {
@@ -443,9 +461,17 @@ onMounted(async () => {
   loadHistory();
 });
 watch(viewDate, load);
+// The resting figure is a different read from the samples, and it moves with the
+// date the same way.
+watch(viewDate, loadResting, { immediate: true });
 
 const geo = computed(() =>
-  heartDayGeometry(samples.value, { sessions: sessions.value })
+  heartDayGeometry(samples.value, {
+    sessions: sessions.value,
+    // The same figure BODY's row shows, so the two cannot differ by a beat and
+    // leave the reader deciding which page to believe.
+    resting: restingForDay.value,
+  })
 );
 const ticks = computed(() => hourTicks(geo.value));
 
@@ -463,15 +489,13 @@ const verdict = computed(() => {
 
   const peak = g.columns.reduce((best, c) => (best == null || c.high > best.high ? c : best), null);
   const when = peak ? clock(peak.minute) : null;
-  // A multiple rather than a percentage: a peak is routinely more than twice
-  // resting, and "182% above where it rested" takes a second read to turn into
-  // the 2.8x it means.
-  const lift = g.resting ? (g.high / g.resting).toFixed(1) : null;
-
-  const parts = [];
-  parts.push(when ? `Peaked at ${g.high} around ${when}` : `Peaked at ${g.high}`);
-  if (lift != null) parts.push(`${lift}× where it rested`);
-  return `${parts.join(", ")}.`;
+  // **The peak and when it happened, and nothing after it.** This used to end
+  // "2.8× where it rested", a multiple chosen over a percentage because a peak
+  // is routinely more than twice resting. Taken off on the user's call
+  // (2026-08-19): the ratio is arithmetic the reader can do from two numbers
+  // already on the page, and it read as the line straining to add something.
+  // The peak and its hour are what the shape is showing.
+  return when ? `Peaked at ${g.high} around ${when}.` : `Peaked at ${g.high}.`;
 });
 
 function clock(minute) {

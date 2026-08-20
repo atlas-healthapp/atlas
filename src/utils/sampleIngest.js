@@ -137,21 +137,27 @@ const NIGHT_FLOOR_MINUTES = 90;
  * that date's *night*, carrying its hours, its stages and its score into the
  * sleep score, regularity and Recovery.
  *
- * **Deliberately the narrowest rule that can catch it.** A sleep counts as
- * daytime only if it begins at or after 09:00, ends by 19:00, and starts and
- * ends on the same calendar day. A real night fails all three: it spans
- * midnight. Even somebody who goes to bed at 03:00 and sleeps until 11:30 is
- * untouched, because the rule is about where the whole session sits and not
- * about how late the wake is.
+ * **The same calendar day is the rule; the clock hours barely matter.** A sleep
+ * counts as daytime if it begins at or after 09:00 and starts and ends on the
+ * same date. A real night fails that outright, because it spans midnight, and
+ * somebody who goes to bed at 03:00 and sleeps until 11:30 is untouched.
+ *
+ * **It used to also require the wake to be before 19:00, and that hour was
+ * invented rather than measured.** Zepp showed a nap of 1:58 running 17:34 to
+ * 19:32 on 2026-08-16. It failed that test by half an hour, was therefore
+ * treated as a candidate for the NIGHT, lost longest-wins to the real night, and
+ * vanished - so the feature shipped and the user's own screenshots were the
+ * thing that disproved the rule. An evening doze that starts and ends before
+ * midnight is still a nap; there is nothing about 19:00 that makes it a night.
  *
  * **Known cost, stated rather than discovered later**: a night-shift sleep from
  * 09:00 to 16:00 is genuinely a night and this calls it a nap. Atlas has no way
  * to tell those apart today and the cost of being wrong falls the safer way -
- * a missing figure rather than a wrong one. It goes away once naps are stored
- * as naps; see the ticket in docs/backlog.md.
+ * a missing figure rather than a wrong one. The cost is now smaller than it
+ * was: such a sleep is stored as a nap rather than lost, it simply does not
+ * count as that night.
  */
 const NAP_EARLIEST_HOUR = 9;
-const NAP_LATEST_HOUR = 19;
 
 /** Is this sleep wholly inside one daytime, ie a nap rather than a night? */
 export function isDaytimeSleep(session) {
@@ -159,18 +165,141 @@ export function isDaytimeSleep(session) {
   const wake = session?.wakeTime;
   if (!(bed instanceof Date) || !(wake instanceof Date)) return false;
   if (bed.toLocaleDateString("sv") !== wake.toLocaleDateString("sv")) return false;
-  return bed.getHours() >= NAP_EARLIEST_HOUR && wake.getHours() < NAP_LATEST_HOUR;
+  return bed.getHours() >= NAP_EARLIEST_HOUR;
 }
 
-export function commitSleepSessions(sessions, checkin) {
+/**
+ * The daytime sleeps, kept instead of thrown away.
+ *
+ * **Stored apart from the night, and that is the whole design.** A nap goes on
+ * the entry as `naps`, never into `sleepStages` or `sleep`, so nothing in
+ * `sleepScore.js` can reach it: every term there is defined over a night, and
+ * adding nap minutes to a night's total is the wake-then-doze conflation the
+ * NEXT ticket exists to tell apart. Keeping them in different fields means that
+ * cannot be done by accident later.
+ *
+ * Filed under the day the nap happened, which for a daytime sleep is the same
+ * date at both ends by definition - unlike a night, which is filed under the
+ * date it *ends*.
+ *
+ * Deduped by bedtime keeping the longest, exactly as nights are, because the
+ * band sends revisions of a session as it refines it. Two genuinely different
+ * bedtimes in one day are two naps and both are kept.
+ *
+ * No floor. `NIGHT_FLOOR_MINUTES` exists to stop a truncated fetch being read as
+ * a night, and a nap has nothing to be mistaken for. Inventing a second
+ * threshold here would only decide which of the band's own sleeps to disbelieve.
+ */
+/**
+ * How far a sleep has to stand clear of a night to be a nap at all.
+ *
+ * **The band's nap block is raw and includes the time you spent falling
+ * asleep.** Measured 2026-08-19: it filed 00:01 to 00:25 as a nap, and the night
+ * proper began at 00:53. Twenty-four minutes of sleep, twenty-eight minutes
+ * awake, then eight hours. That is one going to bed, and calling it a nap put a
+ * NAP card above a night it was part of. Zepp reads the same block and does not
+ * show it, so the vendor filters it too.
+ *
+ * An hour, because "you were asleep again within the hour" is the same going to
+ * bed rather than a separate event. Not fitted to the data: the twelve real naps
+ * sit 0.9 to 8.4 hours clear of their night, a continuum with no natural split,
+ * so the threshold is a decision. At an hour it reclassifies exactly two - the
+ * one above and an evening doze 54 minutes before bed - and the nearest nap it
+ * keeps stands 98 minutes clear.
+ *
+ * Applied at both ends. Going back to sleep twenty minutes after waking is the
+ * tail of that night by the same argument.
+ */
+export const NAP_NIGHT_GAP_MS = 60 * 60 * 1000;
+
+/** Is this sleep close enough to a night to be part of it? */
+function adjoinsANight(nap, nights) {
+  const bed = nap.bedTime.getTime();
+  const wake = nap.wakeTime.getTime();
+  for (const night of nights ?? []) {
+    const nightBed = night?.bedTime instanceof Date ? night.bedTime.getTime() : night?.bedTime;
+    const nightWake = night?.wakeTime instanceof Date ? night.wakeTime.getTime() : night?.wakeTime;
+    if (!Number.isFinite(nightBed) || !Number.isFinite(nightWake)) continue;
+    // Overlapping counts as adjoining: a gap of zero is the strongest version of
+    // the case this exists for, not an exception to it.
+    if (bed < nightWake + NAP_NIGHT_GAP_MS && wake > nightBed - NAP_NIGHT_GAP_MS) return true;
+  }
+  return false;
+}
+
+export function collectNaps(sessions, bandNaps, nights) {
+  const candidates = [];
+  // The band's own nap block, read off the raw record by `decodeNaps` - which is
+  // where every nap has actually come from since 2026-08-18. A daytime *session*
+  // record has never once been seen, so the branch below is a guard rather than
+  // a source: if one ever arrives it is a nap, not a night.
+  for (const nap of bandNaps ?? []) {
+    if (!(nap?.bedTime instanceof Date) || !(nap?.wakeTime instanceof Date)) continue;
+    candidates.push({
+      bedTime: nap.bedTime,
+      wakeTime: nap.wakeTime,
+      minutes: nap.minutes ?? null,
+      stageTimeline: nap.stageTimeline ?? null,
+    });
+  }
+  for (const session of sessions ?? []) {
+    if (!session || !isDaytimeSleep(session)) continue;
+    candidates.push({
+      bedTime: session.bedTime,
+      wakeTime: session.wakeTime,
+      minutes: session.totalSleepMinutes ?? null,
+    });
+  }
+
+  const byDate = new Map();
+  for (const nap of candidates) {
+    // Dropped rather than stored and hidden. A sleep that adjoins a night is not
+    // a nap by any reading, and keeping it under another name would only give a
+    // later screen something to get wrong. What it actually is - time spent
+    // falling asleep - belongs to the night, and deriving that is the
+    // wake-then-doze ticket's job rather than this function's.
+    if (adjoinsANight(nap, nights)) continue;
+    const dateKey = nap.bedTime.toLocaleDateString("sv");
+    const byBed = byDate.get(dateKey) ?? new Map();
+    const bedKey = nap.bedTime.getTime();
+    const seen = byBed.get(bedKey);
+    if (!seen || (nap.minutes ?? 0) > (seen.minutes ?? 0)) {
+      byBed.set(bedKey, nap);
+    }
+    byDate.set(dateKey, byBed);
+  }
+
+  const out = new Map();
+  for (const [dateKey, byBed] of byDate) {
+    out.set(
+      dateKey,
+      [...byBed.values()]
+        .sort((a, b) => a.bedTime - b.bedTime)
+        .map((s) => ({
+          // Epoch ms for the same reason the night stores them that way: this is
+          // persisted as JSON and a Date comes back a string.
+          bedTime: s.bedTime.getTime(),
+          wakeTime: s.wakeTime.getTime(),
+          minutes: s.minutes ?? null,
+          // The nap's own stages, in the same shape the night's timeline uses.
+          // Null when the band sent none, which is a different thing from a nap
+          // with no stages in it and is what the card keys on.
+          stageTimeline: s.stageTimeline ?? null,
+        }))
+    );
+  }
+  return out;
+}
+
+export function commitSleepSessions(sessions, checkin, bandNaps) {
   const byDate = new Map();
   for (const session of sessions) {
     if (!session) continue;
     // Dropped here rather than at the guards below, so a nap never competes for
     // the date at all. Filtering later would still let a three-hour afternoon
     // sleep out-rank a genuinely bad two-hour night, since the winner is picked
-    // by length. **A nap is not stored anywhere yet** - see the ticket - and
-    // that is a smaller loss than it being stored as the night.
+    // by length. Naps are collected separately below and stored as `naps`, so
+    // this drops it from the NIGHT contest rather than discarding it.
     if (isDaytimeSleep(session)) continue;
     const dateKey = session.wakeTime.toLocaleDateString("sv");
     const bedKey = session.bedTime.getTime();
@@ -284,5 +413,60 @@ export function commitSleepSessions(sessions, checkin) {
     checkin.logMetric({ sleep: hours, sleepStages: stages }, dateKey);
     if (hoursDiffer || stagesDiffer) changed.add(dateKey);
   }
+
+  // **Written separately from the nights, and deliberately not added to
+  // `changed`.** That set is what callers count as "sleep days", and a day whose
+  // only sleep was an afternoon nap is not a night's worth of sleep. The store
+  // is reactive, so a screen showing naps still updates without being told.
+  // **The nights are read back from the store rather than taken from this
+  // batch**, and this loop runs after the one above, so every night committed a
+  // moment ago is included. A routine sync carries two or three nights; the
+  // night a nap has to be measured against is often not one of them, and a nap
+  // kept only because its night was outside the fetch window would be a nap
+  // whose classification depended on when you opened the app.
+  const knownNights = (checkin.entries ?? [])
+    .map((e) => e.sleepStages)
+    .filter((s) => s?.bedTime && s?.wakeTime)
+    .map((s) => ({ bedTime: s.bedTime, wakeTime: s.wakeTime }));
+
+  const collected = collectNaps(sessions, bandNaps, knownNights);
+  for (const [dateKey, naps] of collected) {
+    const previous = checkin.entryFor(dateKey)?.naps ?? null;
+    if (JSON.stringify(previous) === JSON.stringify(naps)) continue;
+    checkin.logMetric({ naps }, dateKey);
+  }
+
+  // **A rejected nap has to clear the one already stored.** The loop above only
+  // visits dates that still have a nap, so tightening the rule would otherwise
+  // leave every nap it now rejects on the phone for ever - which is exactly what
+  // happened to the 2026-08-19 doze the hour rule was written for. Every date
+  // the band offered a nap for is reconsidered, and one that no longer has any
+  // is emptied rather than left.
+  // **Every date the batch covers is reconsidered, not only the dates that came
+  // back with a nap.** Driving this off the naps alone left a stored nap
+  // unclearable the moment the band stopped reporting it, which is not a corner
+  // case: the band REVISES its records. Measured on 2026-08-19 - it filed a
+  // 00:01 doze as a nap in the morning, and by lunchtime the same record came
+  // back with an empty nap block, the band having folded it into the night it
+  // preceded. Zepp had never shown it. So the phone kept a nap that neither the
+  // band nor Atlas believed in any more, and a rule change could not shift it.
+  //
+  // A record's nap block describes the day around its own night, so the night's
+  // wake date is the date to reconsider.
+  const offered = new Set();
+  for (const nap of bandNaps ?? []) {
+    if (nap?.bedTime instanceof Date) offered.add(nap.bedTime.toLocaleDateString("sv"));
+  }
+  for (const session of sessions ?? []) {
+    if (!session?.wakeTime) continue;
+    offered.add(session.wakeTime.toLocaleDateString("sv"));
+    if (isDaytimeSleep(session)) offered.add(session.bedTime.toLocaleDateString("sv"));
+  }
+  for (const dateKey of offered) {
+    if (collected.has(dateKey)) continue;
+    if (!checkin.entryFor(dateKey)?.naps?.length) continue;
+    checkin.logMetric({ naps: [] }, dateKey);
+  }
+
   return changed;
 }

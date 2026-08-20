@@ -61,8 +61,32 @@ export function barGeometry(values, goal, { width = CHART_W, height = CHART_H } 
   const gap = Math.min(3, slot * 0.28);
 
   const bars = [];
+  /**
+   * Days with no reading at all, so the chart can show them.
+   *
+   * **A gap and a bar of zero are different facts and this only marks the gap.**
+   * Nothing was drawn for either, so a fortnight with ten missing creatine days
+   * looked like a fortnight of short bars, and the reader is left asking whether
+   * a column is missing or whether they missed the days - which is exactly how
+   * this was reported. A zero is left alone deliberately: it is a recorded fact
+   * and drawing it as a stub would also stub every day a strap went unworn and
+   * rolled up to zero, turning "no idea" into "you did nothing".
+   */
+  const gaps = [];
   nums.forEach((v, i) => {
-    if (v == null || v <= 0) return;
+    if (v == null) {
+      // Sat on the baseline with a fixed height, so it can never be read as a
+      // very small value: it does not scale with anything.
+      gaps.push({
+        i,
+        x: i * slot + gap / 2,
+        w: Math.max(1, slot - gap),
+        y: height - 2,
+        h: 2,
+      });
+      return;
+    }
+    if (v <= 0) return;
     const h = Math.max(1.5, (v / max) * height);
     bars.push({
       i,
@@ -78,7 +102,7 @@ export function barGeometry(values, goal, { width = CHART_W, height = CHART_H } 
     });
   });
 
-  return { bars, max, targetY: goal ? height - (goal / max) * height : null };
+  return { bars, gaps, max, targetY: goal ? height - (goal / max) * height : null };
 }
 
 /**

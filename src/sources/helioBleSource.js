@@ -10,7 +10,7 @@
 // every other source applies.
 
 import { isMeaningful } from "@/utils/bodyMetrics";
-import { decodeSleepSession } from "@/utils/huamiSleep";
+import { decodeSleepSession, decodeNaps } from "@/utils/huamiSleep";
 
 export const SOURCE_ID = "helio-ble";
 
@@ -22,10 +22,35 @@ export const SOURCE_ID = "helio-ble";
  * BLE path and the Gadgetbridge path cannot disagree about what counts as a
  * real reading.
  */
+/**
+ * The window a reading's timestamp has to fall in to be believed.
+ *
+ * **Found in the real archive on 2026-08-19: 155 samples dated between 1973 and
+ * 2106, every one of them `hrv`, carrying ordinary-looking values.** They are
+ * one in eight hundred, so nothing on a screen was visibly wrong - a date that
+ * does not exist is simply never read back - but they were stored, frozen into
+ * 75 rollup rows for dates like 2105-09-08, and they travel in every backup.
+ *
+ * The cause is in the HRV record decode rather than here: those records are six
+ * bytes with a four-byte timestamp, and some of them plainly are not that. This
+ * is the boundary guard, not the fix. It is worth having either way, because a
+ * value can be range-checked by `isMeaningful` and a timestamp could not be:
+ * `putSamples` is keyed on `[metric, t]`, so a wrong timestamp writes a new row
+ * rather than correcting one, and it is permanent.
+ *
+ * The bounds are deliberately loose. The floor is well before this app existed,
+ * so nothing real can fall under it; the ceiling allows a day of clock skew
+ * between phone and band rather than pretending they agree to the second.
+ */
+export const EARLIEST_PLAUSIBLE = Date.parse("2020-01-01T00:00:00Z");
+export const FUTURE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
+
 export function normaliseSamples(raw) {
   const out = [];
+  const ceiling = Date.now() + FUTURE_TOLERANCE_MS;
   for (const sample of raw ?? []) {
-    if (!sample || typeof sample.t !== "number") continue;
+    if (!sample || typeof sample.t !== "number" || !Number.isFinite(sample.t)) continue;
+    if (sample.t < EARLIEST_PLAUSIBLE || sample.t > ceiling) continue;
     const v = typeof sample.v === "number" ? sample.v : Number(sample.v);
     if (!Number.isFinite(v)) continue;
     if (!isMeaningful(sample.metric, v)) continue;
@@ -49,6 +74,17 @@ export function base64ToBytes(b64) {
  */
 export function decodeSleepBlobs(blobs) {
   return (blobs ?? []).map((b64) => decodeSleepSession(base64ToBytes(b64))).filter(Boolean);
+}
+
+/**
+ * The naps carried by those same records, read separately because a nap can
+ * outlive its record's night: a day whose only sleep was an afternoon one
+ * arrives with an empty night that `decodeSleepBlobs` rightly drops, and the
+ * nap would go with it. Flat rather than grouped - `collectNaps` does the
+ * grouping, and it has to, since two sources can offer the same nap.
+ */
+export function decodeNapBlobs(blobs) {
+  return (blobs ?? []).flatMap((b64) => decodeNaps(base64ToBytes(b64)));
 }
 
 /**

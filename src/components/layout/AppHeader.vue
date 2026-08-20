@@ -10,9 +10,13 @@
          row's gap would open up either side of the separator they already
          carry. Anything slotted in sits beside them as its own item. -->
     <div class="sys mono">
-      <span><b>{{ label }}</b><template v-if="meta"> · {{ meta }}</template></span>
+      <span><b>{{ label }}</b><template v-if="shownMeta"> · {{ shownMeta }}</template></span>
       <slot />
     </div>
+
+    <!-- Under the header line on every tab that has one. Home mounts the same
+         component itself, since it keeps its own header structure. -->
+    <RunningSessionRow />
   </div>
 </template>
 
@@ -29,11 +33,14 @@
 // and its header holds a second line, so it keeps its own markup and reads the
 // shared .wordmark rule from style.css instead. The type is shared; the
 // structure is not, because Home's structure is doing something.
+import { computed } from "vue";
 import ProfileChip from "@/components/layout/ProfileChip.vue";
 import PeakMark from "@/components/layout/PeakMark.vue";
+import RunningSessionRow from "@/components/activity/RunningSessionRow.vue";
 import { useUIStore } from "@/stores/ui";
+import { useHelioStore } from "@/stores/helio";
 
-defineProps({
+const props = defineProps({
   /** The bold word: FUEL DB, BODY, FITNESS. */
   label: { type: String, required: true },
   /** What follows the separator. Omitted rather than empty when there is nothing to say. */
@@ -41,6 +48,33 @@ defineProps({
 });
 
 const ui = useUIStore();
+const helio = useHelioStore();
+
+/**
+ * A running sync takes the line over, then gives it back.
+ *
+ * **Here rather than in each tab.** Three tabs pass their own meta and all three
+ * want the same behaviour, so putting it in the shared header is one definition
+ * instead of three that drift - which is the whole reason this component was
+ * extracted. A tab keeps saying its own thing the moment the sync ends, because
+ * `syncPhase` goes back to null and this falls through to the prop.
+ *
+ * **Replaces the meta rather than joining it**, matching Home, where the phase
+ * takes the sync line over instead of queueing behind "SYNCED 09:17". Appending
+ * would also put two separators in one short line.
+ *
+ * Falls back to SYNCING for the same reason Home does: `syncing` turns on before
+ * the first phase is set, and a blank line at that moment is what made the app
+ * look frozen rather than busy.
+ */
+const shownMeta = computed(() => {
+  if (helio.syncing) return helio.syncPhase || "SYNCING";
+  // The drain moves the numbers without `syncing` ever going true on the
+  // rate-limited path, which is what let Recovery change while the app claimed
+  // to be current. Same reasoning as Home's sync line.
+  if (helio.draining) return helio.syncPhase || "UPDATING";
+  return props.meta;
+});
 </script>
 
 <style scoped>

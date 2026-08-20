@@ -38,7 +38,11 @@ const KEYS = {
   habits: "atlas_habits",
   habitTicks: "atlas_habit_ticks",
   foodLibrary: "atlas_food_library",
-  foodSchedule: "atlas_food_schedule",
+  // `atlas_food_schedule` was here until 2026-08-18, when the weekly template was
+  // removed. Not carried any more because nothing reads it, and a backup that
+  // restores a key no code will ever load is a promise the app cannot keep. The
+  // validator below still tolerates the section, since older backup files have
+  // one and refusing them over a retired feature would be worse than ignoring it.
   foodDayplans: "atlas_food_dayplans",
   theme: "atlas_theme",
   // All of these were missing from v1.

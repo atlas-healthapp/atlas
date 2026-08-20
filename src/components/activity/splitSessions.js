@@ -27,6 +27,21 @@ function within(samples, from, to) {
   );
 }
 
+/**
+ * Average, peak and floor for one window, from the archive's own samples.
+ *
+ * **Exported so a manual session can use the same maths a split part does.** A
+ * session Atlas timed has no heart rate of its own, but if the strap was on the
+ * wrist the samples for that window are in IndexedDB after the next sync, and
+ * they are measured rather than typed - which is the distinction
+ * `ManualSessionSheet` refuses to ask for calories over. A second implementation
+ * of this would be the same defect one file across, and this file's whole reason
+ * for existing is that apportioning a figure is worse than recomputing it.
+ */
+export function aggregateWindow(samples, from, to) {
+  return aggregate(within(samples, from, to));
+}
+
 function aggregate(samples) {
   if (!samples.length) return null;
   const values = samples.map((s) => s.v);

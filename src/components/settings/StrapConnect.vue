@@ -135,6 +135,72 @@
          in a section that does not render until you are connected. -->
     <div v-if="failure" class="failure">
       <div class="mono err ftitle">{{ failure }}</div>
+
+      <!-- **The list, offered only when the failure was "no strap here".** Any
+           other failure has already found the device, so a device picker would be
+           answering a question nobody asked.
+
+           This exists because of a 1.0.6 report where five devices were bonded,
+           none matched the name rules, and the person could see their strap
+           working. Whether one of those five was the strap is not something Atlas
+           can know: a rule loose enough to catch an arbitrary name would also
+           match earbuds. So it shows what it found and lets the one person who
+           can see the strap say which it is. An empty list is equally an answer,
+           and a different one. -->
+      <div v-if="notFound" class="picker">
+        <div v-if="!bonded.supported" class="dim-text mono note">
+          THIS DEVICE HAS NO BLUETOOTH ADAPTER ATLAS CAN READ.
+        </div>
+        <template v-else-if="!bonded.enabled">
+          <div class="dim-text mono note">
+            BLUETOOTH IS OFF, SO NOTHING CAN BE LISTED. TURN IT ON AND TRY AGAIN.
+          </div>
+        </template>
+        <template v-else-if="!bonded.devices.length">
+          <div class="dim-text mono note">
+            NOTHING IS PAIRED TO THIS PHONE. PAIR THE STRAP IN ANDROID'S BLUETOOTH
+            SETTINGS FIRST. PAIRING IT ONLY IN ZEPP IS NOT ENOUGH.
+          </div>
+        </template>
+        <template v-else>
+          <div class="dim-text mono note">
+            ATLAS DID NOT RECOGNISE ANY OF THESE AS THE STRAP. IF ONE OF THEM IS
+            YOURS, PICK IT. IF NONE IS, THE STRAP IS NOT PAIRED TO THIS PHONE.
+          </div>
+          <button
+            v-for="d in bonded.devices"
+            :key="d.address"
+            class="brow mono"
+            :class="{ on: d.chosen }"
+            type="button"
+            @click="chooseDevice(d)"
+          >
+            <span class="bname">{{ d.name || "UNNAMED DEVICE" }}</span>
+            <span class="baddr">
+              {{ d.address }}
+              <!-- **Connected but not paired is a real state and worth naming.**
+                   A BLE device can hold a connection without ever being bonded,
+                   which is one explanation for a strap that is plainly working
+                   while Atlas says it is not paired. Somebody scanning this list
+                   for their band is far more likely to recognise the one marked
+                   CONNECTED than a MAC address. -->
+              <template v-if="d.connected && !d.bonded"> · CONNECTED, NOT PAIRED</template>
+              <template v-else-if="d.connected"> · CONNECTED</template>
+            </span>
+          </button>
+          <!-- The way out of a wrong pick. Without it a mistake survives every
+               restart exactly as well as a correct choice does. -->
+          <button
+            v-if="bonded.devices.some((d) => d.chosen)"
+            class="databtn mono"
+            type="button"
+            @click="clearDevice"
+          >
+            FORGET THE ONE I PICKED
+          </button>
+        </template>
+      </div>
+
       <div class="dim-text mono note">
         SEND THE DETAILS BELOW WITH ANY BUG REPORT. THEY CONTAIN NO PERSONAL DATA
         AND NOT YOUR PAIRING KEY.
@@ -255,6 +321,33 @@ async function copyDetails() {
   }
 }
 
+/**
+ * Whether the last failure was "nothing here looks like the strap", which is the
+ * only one a device list can help with. Matched on the message the native side
+ * sends for exactly that case.
+ */
+const notFound = computed(() => failure.value.includes("NOT PAIRED TO THIS PHONE"));
+
+const bonded = ref({ supported: true, enabled: true, devices: [] });
+
+async function chooseDevice(device) {
+  const ok = await helio.setStrapAddress(device.address);
+  if (!ok) {
+    flash("COULD NOT SAVE THAT CHOICE.");
+    return;
+  }
+  bonded.value = await helio.listBondedDevices();
+  // Straight into a connect rather than leaving them to press CONNECT again:
+  // picking a device is the answer to the question the failure asked, so the
+  // obvious next thing is to find out whether it was the right answer.
+  await doConnect();
+}
+
+async function clearDevice() {
+  await helio.setStrapAddress("");
+  bonded.value = await helio.listBondedDevices();
+}
+
 async function doConnect() {
   failure.value = "";
   showLog.value = false;
@@ -267,6 +360,10 @@ async function doConnect() {
     emit("connected", res);
   } catch (e) {
     failure.value = "COULD NOT CONNECT: " + (e?.message || String(e)).toUpperCase();
+    // Read after the failure, not on mount: this is the one moment the list is
+    // worth anything, and asking for it up front would spend a Bluetooth call on
+    // every open of a panel that usually just connects.
+    if (notFound.value) bonded.value = await helio.listBondedDevices();
   }
 }
 </script>
@@ -433,6 +530,42 @@ async function doConnect() {
   font-size: 11px;
   line-height: 1.55;
   letter-spacing: 1px;
+}
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+/* A row, at the same 44pt floor everything tappable in Atlas is held to. The
+   address is shown because two pairs of earbuds can carry the same name and the
+   address is the only thing that tells them apart. */
+.brow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 44px;
+  justify-content: center;
+  padding: 7px 11px;
+  text-align: left;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+.brow.on {
+  border-color: var(--acc);
+}
+.bname {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.baddr {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
 }
 .log {
   margin-top: 10px;

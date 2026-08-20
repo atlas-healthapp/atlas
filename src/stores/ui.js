@@ -31,6 +31,24 @@ export const useUIStore = defineStore("ui", () => {
     activeTab.value = id;
   }
 
+  // ── Arriving from a widget ────────────────────────────────────────────
+  //
+  // **A target is claimed, never consumed.** A widget names the page it is
+  // about ("heart"), the owning tab asks whether that is for it, and only the
+  // one that recognises it clears it. The alternative shape is what broke ADD
+  // ACTIVITY once: FoodTab took *any* pending intent before checking whether it
+  // had a target, so the node opened once and never again.
+  //
+  // Set by App.vue from a value MainActivity leaves in SharedPreferences, since
+  // nothing native can reach the app any other way round.
+  const pendingOpen = ref(null);
+
+  function claimOpen(target) {
+    if (pendingOpen.value !== target) return false;
+    pendingOpen.value = null;
+    return true;
+  }
+
   function goToFood(subTab = "diary") {
     foodSubTab.value = subTab;
     setTab("food");
@@ -149,6 +167,8 @@ export const useUIStore = defineStore("ui", () => {
   }
 
   return {
+    pendingOpen,
+    claimOpen,
     activeTab,
     bootActive,
     foodSubTab,

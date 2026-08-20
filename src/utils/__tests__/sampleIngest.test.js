@@ -13,6 +13,11 @@ import { today } from "@/utils/date";
 function fakeCheckin() {
   const byDate = new Map();
   return {
+    // The real store exposes every entry; commitSleepSessions reads it to find
+    // the nights a nap has to stand clear of.
+    get entries() {
+      return [...byDate.entries()].map(([date, e]) => ({ date, ...e }));
+    },
     entryFor: (d) => byDate.get(d) ?? null,
     logMetric: (fields, date) => {
       let e = byDate.get(date);
@@ -205,9 +210,78 @@ describe("naps", () => {
     // The bug: the 90-minute floor cannot catch a two-hour nap, and on a day the
     // band recorded no night there is nothing for it to lose to, so it was
     // committed as the night with its hours, stages and score.
+    //
+    // **Asserted as "no night", not as "no entry" (2026-08-18).** This used to
+    // expect nothing at all, because a nap was discarded outright. Naps are kept
+    // now, in their own field, and the rule this test exists for is the one that
+    // still matters: a nap contributes no hours, no stages and no score, so
+    // nothing sleepScore.js reads can ever see it.
     const checkin = fakeCheckin();
     commitSleepSessions([nap()], checkin);
-    expect(checkin.entryFor("2026-07-28")).toBeNull();
+    const entry = checkin.entryFor("2026-07-28");
+    expect(entry.sleep).toBeUndefined();
+    expect(entry.sleepStages).toBeUndefined();
+    expect(entry.naps).toHaveLength(1);
+  });
+
+  it("clears a stored nap the rule now rejects", () => {
+    // Tightening a rule is only half a fix. The nap write only visits dates that
+    // still have one, so without this the 2026-08-19 doze - stored before the
+    // hour rule existed - would have sat on that date for ever, and the fix
+    // would have looked like it had not worked.
+    const checkin = fakeCheckin();
+    checkin.logMetric(
+      { naps: [{ bedTime: new Date("2026-08-19T00:01:00").getTime(), minutes: 24 }] },
+      "2026-08-19"
+    );
+
+    commitSleepSessions(
+      [
+        session({
+          bedTime: new Date("2026-08-19T00:53:00"),
+          wakeTime: new Date("2026-08-19T09:04:00"),
+          totalSleepMinutes: 486,
+        }),
+      ],
+      checkin,
+      [
+        {
+          bedTime: new Date("2026-08-19T00:01:00"),
+          wakeTime: new Date("2026-08-19T00:25:00"),
+          minutes: 24,
+        },
+      ]
+    );
+
+    expect(checkin.entryFor("2026-08-19").naps).toEqual([]);
+  });
+
+  it("clears a stored nap the band has stopped reporting", () => {
+    // **The band revises its own records.** On 2026-08-19 it filed a 00:01 doze
+    // as a nap; by lunchtime the same record came back with an empty nap block,
+    // folded into the night it preceded, and Zepp had never shown it. Clearing
+    // driven by the naps that came back therefore never visited that date, and
+    // the phone kept a nap nothing believed in - the fix looked like it had not
+    // worked, because the evidence on screen was unchanged.
+    const checkin = fakeCheckin();
+    checkin.logMetric(
+      { naps: [{ bedTime: new Date("2026-08-19T00:01:00").getTime(), minutes: 24 }] },
+      "2026-08-19"
+    );
+
+    commitSleepSessions(
+      [
+        session({
+          bedTime: new Date("2026-08-19T00:53:00"),
+          wakeTime: new Date("2026-08-19T09:04:00"),
+          totalSleepMinutes: 486,
+        }),
+      ],
+      checkin,
+      [] // the record came back with no nap block at all
+    );
+
+    expect(checkin.entryFor("2026-08-19").naps).toEqual([]);
   });
 
   it("does not let a long nap out-rank a genuinely bad night", () => {
@@ -243,7 +317,7 @@ describe("naps", () => {
     expect(checkin.entryFor("2026-07-28").sleep).toBeCloseTo(10, 5);
   });
 
-  it("draws the line at the hours, not at the duration", () => {
+  it("draws the line at the calendar day, not at the clock or the duration", () => {
     expect(isDaytimeSleep(nap())).toBe(true);
     // Starts before 09:00, so it is the tail of a night rather than a nap.
     expect(
@@ -252,11 +326,29 @@ describe("naps", () => {
         wakeTime: new Date("2026-07-28T10:00:00"),
       })
     ).toBe(false);
-    // Runs past 19:00, which is an early bedtime rather than a nap.
+    // **An evening doze is still a nap.** This expected false, from a rule that
+    // required the wake to be before 19:00 - an hour that was invented rather
+    // than measured. Zepp showed a real nap of 1:58 running 17:34 to 19:32,
+    // which that rule threw away by half an hour: it made the session a
+    // candidate for the night, where longest-wins discarded it.
+    expect(
+      isDaytimeSleep({
+        bedTime: new Date("2026-08-16T17:34:00"),
+        wakeTime: new Date("2026-08-16T19:32:00"),
+      })
+    ).toBe(true);
     expect(
       isDaytimeSleep({
         bedTime: new Date("2026-07-28T18:00:00"),
         wakeTime: new Date("2026-07-28T20:30:00"),
+      })
+    ).toBe(true);
+    // A genuine early night still fails, and not because of the clock: it spans
+    // midnight, which is what the rule actually tests.
+    expect(
+      isDaytimeSleep({
+        bedTime: new Date("2026-07-28T20:00:00"),
+        wakeTime: new Date("2026-07-29T06:00:00"),
       })
     ).toBe(false);
     // Anything that is not a pair of Dates is not something to judge.

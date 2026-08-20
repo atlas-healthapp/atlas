@@ -26,9 +26,6 @@ export function mealTypeFromTime(hhmm) {
 // comment. An item is either flat (has its own typed macros) or composite
 // (has ingredients), never both. Nesting is allowed - a composite's
 // ingredient can itself be composite.
-// Weekly schedule: { [weekday 0-6]: [{ time, mealId, quantity? }] } - the
-// recurring template. quantity is how many of baseUnit that slot uses;
-// missing/legacy slots default to the item's own baseAmount (1x).
 // A slot/snack may also carry `extras: [{ itemId, quantity, name, protein?,
 // kcal?, carbs?, fat?, fibre? }]` - things added to that one logged meal on
 // that one day. Their macros sit alongside the parent's rather than inside
@@ -46,9 +43,12 @@ export function mealTypeFromTime(hhmm) {
 // Day plan: { date, slots: [{ time, mealId, confirmed, quantity?, name?,
 // protein?, kcal?, carbs?, fat? }], snacks: [{ mealId, at, quantity?, name?,
 // protein?, kcal?, carbs?, fat? }] }
-// Day plans start empty and are seeded from the weekly schedule the first time
-// that date is viewed (see planFor), so editing the template doesn't retroactively
-// rewrite days that already diverged from it.
+// **Nothing writes a slot any more** (2026-08-18). Day plans are created empty
+// and everything logged goes through addSnack into `snacks`, carrying a
+// `mealType` that says which section it belongs to - which is what breakfast,
+// lunch and dinner have always done. `slots` is read and summed for the plans
+// that already hold some, and is otherwise vestigial: see the weekly-template
+// removal note on planFor.
 // name/protein/kcal/carbs/fat/quantity on a slot/snack are a snapshot of the
 // library item, ALREADY SCALED by quantity, taken at seed/swap/add time -
 // history stays honest even if the item is later edited or deleted from the
@@ -60,24 +60,10 @@ export function mealTypeFromTime(hhmm) {
 // explicitly opts in after an edit; it is never automatic.
 export const useFoodStore = defineStore("food", () => {
   const library = ref(load("atlas_food_library", []));
-  const schedule = ref(
-    load("atlas_food_schedule", {
-      0: [],
-      1: [],
-      2: [],
-      3: [],
-      4: [],
-      5: [],
-      6: [],
-    })
-  );
   const dayPlans = ref(load("atlas_food_dayplans", []));
 
   function _persistLib() {
     persist("atlas_food_library", library.value);
-  }
-  function _persistSchedule() {
-    persist("atlas_food_schedule", schedule.value);
   }
   function _persistPlans() {
     persist("atlas_food_dayplans", dayPlans.value);
@@ -258,38 +244,26 @@ export const useFoodStore = defineStore("food", () => {
     return scaleItem(item, quantity);
   }
 
-  function setScheduleForDay(weekday, slots) {
-    schedule.value[weekday] = slots;
-    _persistSchedule();
-  }
-
-  // Returns (and lazily creates) the plan for a date. Only today() gets
-  // seeded from the weekly template - any other date (past-day Diary
-  // navigation) gets an empty plan instead, since fabricating "what the
-  // template would have said" after the fact would misrepresent a day that
-  // was never actually planned that way. Used internally by every mutating
+  // Returns (and lazily creates) an empty plan for a date.
+  //
+  // **The weekly template is gone** (2026-08-18). This used to seed today's
+  // slots from it, and that was the whole plan-and-confirm model: a template you
+  // filled in once, seeded into each day, confirmed with a tap. Measured on the
+  // real archive before removing it: **0 items in the template, 0 confirmed
+  // slots, and 118 logged entries** - all of them going through `addSnack`,
+  // which is what every section writes to, breakfast and dinner included. The
+  // user confirmed he adds food ad-hoc and does not want to schedule it.
+  //
+  // So nothing creates a slot any more. The slot machinery below still reads and
+  // sums them for the day plans that already contain some, and removing it is a
+  // second job with a real blast radius across the diary - see the ticket.
+  // Used internally by every mutating
   // function below; read-only display code should use planForDate instead,
   // which never creates or persists anything.
   function planFor(date) {
     let plan = dayPlans.value.find((p) => p.date === date);
     if (!plan) {
-      if (date === today()) {
-        const dow = new Date(date + "T12:00:00").getDay();
-        const template = schedule.value[dow] ?? [];
-        plan = {
-          date,
-          slots: template.map((t) => ({
-            time: t.time,
-            mealId: t.mealId,
-            mealType: t.mealType ?? null,
-            confirmed: false,
-            ..._snapshot(t.mealId, t.quantity),
-          })),
-          snacks: [],
-        };
-      } else {
-        plan = { date, slots: [], snacks: [] };
-      }
+      plan = { date, slots: [], snacks: [] };
       dayPlans.value.push(plan);
       _persistPlans();
     }
@@ -670,7 +644,6 @@ export const useFoodStore = defineStore("food", () => {
 
   return {
     library,
-    schedule,
     dayPlans,
     addExtra,
     removeExtra,
@@ -687,7 +660,6 @@ export const useFoodStore = defineStore("food", () => {
     wouldCreateCycle,
     usedAsIngredientCount,
     logCountForItem,
-    setScheduleForDay,
     planFor,
     planForDate,
     confirmSlot,

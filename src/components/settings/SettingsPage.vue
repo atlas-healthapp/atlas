@@ -68,11 +68,73 @@
              offering the least important control at the top. -->
         <DevicePanel :open="openSection === 'device'" @toggle="toggle('device')" />
 
+        <!-- Option C of three mocked up 2026-08-17: the rows you come back to are
+             on the page, the rows you set once fold behind SETUP below them.
+
+             **The strap stays above this group rather than inside SETUP**, on the
+             user's call and for the reason its own comment gives: it is the row
+             you need on the day it stops working, and a set-once group is exactly
+             where it must not be that morning. The mockup had it folded in, with a
+             note that it would have to climb back out by itself on a failure; not
+             putting it in is the simpler answer to the same problem. -->
+        <GoalsPanel :open="openSection === 'goals'" @toggle="toggle('goals')" />
+
+        <DialsPanel :open="openSection === 'dials'" @toggle="toggle('dials')" />
+
+        <!-- Only once the strap is set up: an alarm needs the pairing key, and
+             a panel offering to write one without it could only ever fail. -->
+        <AlarmPanel
+          v-if="helio.connected"
+          :open="openSection === 'alarm'"
+          @toggle="toggle('alarm')"
+        />
+
+        <!-- **One card, not five.** Open, the group's rows have to read as being
+             inside it rather than as four more drawers that appeared at the same
+             level, which is what a row of siblings looked like. So the group is a
+             single `.panel`: SETUP is its header and the rows are rows in it,
+             hairline-separated and inset, exactly like every other multi-row card
+             in the app. Passing `nested` is what drops each row's own surface, so
+             this is still one container rather than a card inside a card.
+
+             The group keeps its own flag rather than a value of `openSection`,
+             because that ref is one-open-at-a-time and opening a child would
+             otherwise close the group the child lives in. -->
+        <div class="panel setupgroup" :class="{ open: setupOpen }">
+          <button
+            class="grouprow"
+            :class="{ open: setupOpen }"
+            type="button"
+            :aria-expanded="setupOpen"
+            @click="toggleSetup"
+          >
+            <span class="grouptitle mono">SETUP</span>
+            <span class="groupright">
+              <span class="groupsum mono">
+                {{ setupOpen ? "4 THINGS YOU SET ONCE" : "YOU, UNITS, THEME, TRIPS" }}
+              </span>
+              <svg
+                class="groupcaret"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </span>
+          </button>
+
         <!-- Both fields were only ever askable at first run, so anyone already
              past it could not set or correct them. Date of birth needs a way in
              particularly: it arrived after this user was onboarded, so without
              this panel there was no way for him to enter it at all. -->
         <SettingsSection
+          v-if="setupOpen"
+          nested
           title="YOU"
           :summary="profile.name ? profile.name.toUpperCase() : 'NOT SET'"
           :open="openSection === 'you'"
@@ -165,16 +227,16 @@
           </div>
         </SettingsSection>
 
-        <!-- Straight after YOU, because the two together are what makes the app
-             yours rather than the author's, and because half of these targets
-             only make sense once it knows your weight. -->
-        <GoalsPanel :open="openSection === 'goals'" @toggle="toggle('goals')" />
-
-        <UnitsPanel :open="openSection === 'units'" @toggle="toggle('units')" />
-
-        <DialsPanel :open="openSection === 'dials'" @toggle="toggle('dials')" />
+        <UnitsPanel
+          v-if="setupOpen"
+          nested
+          :open="openSection === 'units'"
+          @toggle="toggle('units')"
+        />
 
         <SettingsSection
+          v-if="setupOpen"
+          nested
           title="APPEARANCE"
           :summary="activeTheme.label.toUpperCase()"
           :open="openSection === 'theme'"
@@ -200,17 +262,44 @@
         </SettingsSection>
 
 
-        <!-- Only once the strap is set up: an alarm needs the pairing key, and
-             a panel offering to write one without it could only ever fail. -->
-        <AlarmPanel
-          v-if="helio.connected"
-          :open="openSection === 'alarm'"
-          @toggle="toggle('alarm')"
-        />
-
+        <!-- A trip is annotation rather than configuration: it changes nothing
+             about how Atlas behaves, only how a gap in a chart is labelled once
+             one has appeared. Which is what makes it set-once-and-forget, so it
+             moved up from below DATA to join the group rather than sitting under
+             the one row on this page that can lose everything. -->
         <SettingsSection
-          title="DATA // BACKUP"
-          summary="JSON"
+          v-if="setupOpen"
+          nested
+          title="TRIPS // GAPS"
+          :summary="`${trips.trips.length} LOGGED`"
+          :open="openSection === 'trips'"
+          @toggle="toggle('trips')"
+        >
+          <div class="dim-text mono">
+            NAMES THE GAPS IN HISTORY CHARTS.
+          </div>
+          <button class="databtn mono trips" @click="tripManagerOpen = true">MANAGE TRIPS</button>
+        </SettingsSection>
+        </div>
+        <!-- /setupgroup -->
+
+        <!-- **Below the group, and named for what it does.** It was called
+             DATA // BACKUP with a summary of "JSON", which described the file
+             format of the one row here that can lose everything while looking
+             exactly like the theme picker two rows up. It now says what it does
+             and how much is at stake.
+
+             **Not painted red, and that was a real mistake worth recording.** It
+             carried `danger`, which colours the summary in --bad - so the only red
+             thing on the row was the reading count, a neutral fact, while the row
+             itself went unmarked. Red there reads as a call to action, drawing the
+             eye to the one row you should least casually tap. The destruction is
+             already marked where it happens: the confirm button behind the import
+             prompt is `databtn danger`, after a prompt naming what it replaces.
+             Backing up is safe; only restoring is not, and only that is red. -->
+        <SettingsSection
+          title="BACK UP OR RESTORE"
+          :summary="archiveSummary"
           :open="openSection === 'data'"
           @toggle="toggle('data')"
         >
@@ -270,23 +359,6 @@
           </div>
         </SettingsSection>
 
-        <!-- Last, on purpose. A trip is annotation rather than configuration:
-             it changes nothing about how Atlas behaves, only how a gap in a
-             chart is labelled once one has appeared. It sat third, above the
-             strap and the alarm, which put the rarest thing in the list above
-             the two that are actually about the device. -->
-        <SettingsSection
-          title="TRIPS // GAPS"
-          :summary="`${trips.trips.length} LOGGED`"
-          :open="openSection === 'trips'"
-          @toggle="toggle('trips')"
-        >
-          <div class="dim-text mono">
-            NAMES THE GAPS IN HISTORY CHARTS.
-          </div>
-          <button class="databtn mono trips" @click="tripManagerOpen = true">MANAGE TRIPS</button>
-        </SettingsSection>
-
         <!-- Last, and a row rather than a section: it does one thing, and
              opening a panel to find a single button would be the same
              discoverability problem one level down. -->
@@ -338,11 +410,66 @@ const openSection = ref(null);
 const toggle = (key) => {
   openSection.value = openSection.value === key ? null : key;
 };
+
+/**
+ * How much there is to lose, for the row that can lose it.
+ *
+ * Counted rather than derived from anything already in memory, because nothing in
+ * memory knows: the archive lives in IndexedDB and the stores hold days, not
+ * readings. `countSamples` uses IndexedDB's own `count()`, so this is a number
+ * rather than a read of the whole store.
+ *
+ * **Withheld until it answers**, not shown as 0. A backup row reading
+ * "0 READINGS" while the count is still in flight says the archive is empty,
+ * which is the one thing it must never say wrongly.
+ */
+const archiveCount = ref(null);
+countSamples()
+  .then((n) => {
+    archiveCount.value = n;
+  })
+  .catch(() => {
+    // Leave it null. The row still works; it just does not boast about a figure
+    // it could not read.
+  });
+
+const archiveSummary = computed(() => {
+  if (archiveCount.value == null) return "";
+  if (archiveCount.value === 0) return "NOTHING STORED YET";
+  return `${archiveCount.value.toLocaleString("en-AU")} READINGS`;
+});
+
+/**
+ * Whether the set-once group is showing.
+ *
+ * **Its own flag, not a value of `openSection`.** That ref is one-open-at-a-time
+ * by design, so if the group used it, opening YOU inside the group would have
+ * closed the group and taken YOU with it.
+ *
+ * Closed on arrival, like every section. The rows in here are the ones you set
+ * during first run and then leave alone, so the page opens as three rows and a
+ * door rather than as ten rows.
+ */
+const setupOpen = ref(false);
+
+/** Rows that live inside the group, so collapsing it can tidy up after itself. */
+const SETUP_KEYS = ["you", "units", "theme", "trips"];
+
+function toggleSetup() {
+  setupOpen.value = !setupOpen.value;
+  // A child left open while the group closes would spring back expanded next
+  // time the group opens, which reads as the page remembering something you did
+  // not ask it to.
+  if (!setupOpen.value && SETUP_KEYS.includes(openSection.value)) {
+    openSection.value = null;
+  }
+}
 import { useThemeStore, THEMES } from "@/stores/theme";
 import { useCheckinStore } from "@/stores/checkin";
 import { useProfileStore } from "@/stores/profile";
 import { useTripsStore } from "@/stores/trips";
 import { exportBackup, readBackupFile, applyBackup } from "@/utils/backup";
+import { countSamples } from "@/utils/sampleDb";
 import { cachedUpdate, checkForUpdate } from "@/utils/updateCheck";
 import { parseV10File, mergeIntoCheckin } from "@/utils/v10import";
 import { useBackClose } from "@/composables/useBackClose";
@@ -840,6 +967,72 @@ function doV10Merge() {
   color: var(--bg1);
   background: var(--acc);
   border-color: var(--acc);
+}
+/* The group's card. One surface holding the header and its rows, so what is
+   inside SETUP reads as inside it. Closed it is indistinguishable from any other
+   settings row, which is the point: it only becomes a container once it has
+   something to contain. */
+.setupgroup {
+  padding: 0;
+  margin-bottom: 10px;
+  /* clip, not hidden, for the same reason SettingsSection gives: hidden would
+     make this a scroll container and let a slightly-too-wide child scroll inside
+     the card instead of being laid out to fit it. */
+  overflow: clip;
+}
+/* Its header. Deliberately the same metrics and type as SettingsSection's own
+   header, including the 2026-08-17 size bump, so the door looks like the rows it
+   opens. If those move, these move with them. */
+.grouprow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  margin: 0;
+  padding: 0 14px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  letter-spacing: 1.6px;
+}
+/* Open, the header takes the accent its contents are gathered under, which is the
+   one cue that survives being scrolled past. */
+.grouprow.open .grouptitle {
+  color: var(--acc);
+}
+/* Same nowrap reasoning as SettingsSection's .title. */
+.grouptitle {
+  color: var(--ink);
+  white-space: nowrap;
+  flex: none;
+}
+.groupright {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--dim);
+}
+/* A step below the title, matching SettingsSection's .summary. */
+.groupsum {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.groupcaret {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  transition: transform 140ms ease;
+}
+.grouprow.open .groupcaret {
+  transform: rotate(180deg);
 }
 .databtn.trips {
   margin-top: 12px;

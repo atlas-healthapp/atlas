@@ -1,0 +1,461 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Atlas card: the three dials you chose on Home, whichever they are.
+
+     **It reads the payload's `dials`, not three metrics fixed here.** Home's dial
+     row has been user-selectable since 2026-08-12, and a widget that hardcoded
+     Recovery, steps and sleep showed a set the app itself was not showing -
+     reported as "it's not showing the right metrics based on my app".
+
+     **Two bodies, one visible at a time, and WIDTH alone decides.** Columns when
+     the card is wide, a row each when it is narrow, because three columns of
+     23sp figures need width and nothing else. Height must not enter into it: a
+     version that also required the card to be short sent a wide 373x206dp card
+     to rows for being tall, which is the opposite of the rule. RemoteViews
+     cannot build views at runtime, so both bodies exist here and one is hidden.
+
+     The stamp lives in the footer (option 2 of five mocked up): with SYNCED
+     14:32 in the header, the wordmark could never be centred, since the two
+     sides of it were never the same width.
+
+     Two RemoteViews rules the notification paid for: a plain View is not on the
+     inflatable whitelist, so a divider is an ImageView; and ?android:attr colours
+     resolve against the inflating context, so every colour here is an own
+     resource. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_today_label" />
+
+        <!-- Centred by having equal weights either side, rather than by sitting
+             between two things that happen to be different widths. -->
+        <TextView
+            android:id="@+id/widget_mark"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_wordmark" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="end|center_vertical">
+
+            <ImageView
+                android:id="@+id/widget_refresh"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginTop="-8dp"
+                android:layout_marginBottom="-8dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_widget_refresh"
+                android:contentDescription="@string/widget_refresh" />
+
+            <ProgressBar
+                android:id="@+id/widget_spinner"
+                style="?android:attr/progressBarStyleSmall"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginTop="-8dp"
+                android:layout_marginBottom="-8dp"
+                android:padding="8dp"
+                android:indeterminate="true"
+                android:indeterminateTint="@color/widget_dim"
+                android:visibility="gone" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Wide: three columns, each label under its own figure. -->
+    <LinearLayout
+        android:id="@+id/body_columns"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginEnd="10dp"
+            android:gravity="center_vertical"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/col_val_1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="34sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:includeFontPadding="false"
+                android:textColor="@color/widget_ink" android:text="54"
+                />
+            <TextView
+                android:id="@+id/col_key_1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" android:text="RECOVERY"
+                />
+            <ImageView
+                android:id="@+id/col_bar_1"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="6dp"
+                android:scaleType="fitXY"
+                android:importantForAccessibility="no" android:src="@drawable/widget_preview_bar_recovery"
+                />
+            <TextView
+                android:id="@+id/col_sub_1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.08"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim"
+                android:alpha="0.75"
+                android:text="NORMAL" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginEnd="10dp"
+            android:gravity="center_vertical"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/col_val_2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="34sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:includeFontPadding="false"
+                android:textColor="@color/widget_ink" android:text="8h06m"
+                />
+            <TextView
+                android:id="@+id/col_key_2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" android:text="SLEEP"
+                />
+            <ImageView
+                android:id="@+id/col_bar_2"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="6dp"
+                android:scaleType="fitXY"
+                android:importantForAccessibility="no" android:src="@drawable/widget_preview_bar_body"
+                />
+            <TextView
+                android:id="@+id/col_sub_2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.08"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim"
+                android:alpha="0.75"
+                android:text="8h 06m" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/col_val_3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="34sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:includeFontPadding="false"
+                android:textColor="@color/widget_ink" android:text="37G"
+                />
+            <TextView
+                android:id="@+id/col_key_3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" android:text="PROTEIN"
+                />
+            <ImageView
+                android:id="@+id/col_bar_3"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="6dp"
+                android:scaleType="fitXY"
+                android:importantForAccessibility="no" android:src="@drawable/widget_preview_bar_intake"
+                />
+            <TextView
+                android:id="@+id/col_sub_3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.08"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim"
+                android:alpha="0.75"
+                android:text="OF 160G" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Narrow: a row each, which is what the notification's expanded view does
+         and the only shape that survives losing the width. -->
+    <LinearLayout
+        android:id="@+id/body_rows"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:baselineAligned="true"
+            android:id="@+id/row_head_1">
+            <TextView
+                android:id="@+id/row_key_1"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:textSize="13sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" android:text="RECOVERY"
+                />
+            <TextView
+                android:id="@+id/row_val_1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="@color/widget_ink" android:text="54"
+                />
+        </LinearLayout>
+        <ImageView
+            android:id="@+id/row_bar_1"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="9dp"
+            android:scaleType="fitXY"
+            android:importantForAccessibility="no" android:src="@drawable/widget_preview_bar_recovery"
+                />
+            <TextView
+                android:id="@+id/row_sub_1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.08"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim"
+                android:alpha="0.75"
+                android:text="NORMAL" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:baselineAligned="true"
+            android:id="@+id/row_head_2">
+            <TextView
+                android:id="@+id/row_key_2"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:textSize="13sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" android:text="SLEEP"
+                />
+            <TextView
+                android:id="@+id/row_val_2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="@color/widget_ink" android:text="8h06m"
+                />
+        </LinearLayout>
+        <ImageView
+            android:id="@+id/row_bar_2"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="9dp"
+            android:scaleType="fitXY"
+            android:importantForAccessibility="no" android:src="@drawable/widget_preview_bar_body"
+                />
+            <TextView
+                android:id="@+id/row_sub_2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.08"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim"
+                android:alpha="0.75"
+                android:text="8h 06m" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:baselineAligned="true"
+            android:id="@+id/row_head_3">
+            <TextView
+                android:id="@+id/row_key_3"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:textSize="13sp"
+                android:letterSpacing="0.12"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim" android:text="PROTEIN"
+                />
+            <TextView
+                android:id="@+id/row_val_3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="@color/widget_ink" android:text="37G"
+                />
+        </LinearLayout>
+        <ImageView
+            android:id="@+id/row_bar_3"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="4dp"
+            android:scaleType="fitXY"
+            android:importantForAccessibility="no" android:src="@drawable/widget_preview_bar_intake"
+                />
+            <TextView
+                android:id="@+id/row_sub_3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:letterSpacing="0.08"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim"
+                android:alpha="0.75"
+                android:text="OF 160G" />
+    </LinearLayout>
+
+    
+    <!-- **The footer is one row with two ends.** The battery sits bottom left
+         and the sync stamp bottom right, because they answer one question
+         between them - is this reading current, and will the next one arrive -
+         and reading them as one run of text made the stamp harder to find. Equal
+         weights, so neither end moves when the other's string changes length. -->
+    <LinearLayout
+        android:id="@+id/widget_footer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:baselineAligned="true"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/widget_battery"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="start"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_battery" />
+
+        <TextView
+            android:id="@+id/widget_synced"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="end"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_synced" />
+    </LinearLayout>
+</LinearLayout>

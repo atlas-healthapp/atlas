@@ -343,6 +343,37 @@ export function computeRecovery({
     };
   }
 
+  // **Sleep on its own is not Recovery, however confident the arithmetic looks.**
+  //
+  // Redistribution is right for one missing term and wrong for three quarters of
+  // the score. HRV and resting heart rate carry 75 points between them, so with
+  // neither of them the weight all lands on sleep and the app prints a Recovery
+  // score that is a sleep score wearing a different name.
+  //
+  // Seen on the phone at 10:22 on 2026-08-19, and reported: the app opened,
+  // showed **75, GOOD, "5 points to GREAT"** while BODY said NO READINGS YET,
+  // then fell to **54, NORMAL** the moment the sync landed the day's vitals. The
+  // 75 was last night's sleep alone. Nothing was stale and nothing was broken -
+  // the score was computed exactly as designed, from one term.
+  //
+  // Not gated on a sync being in flight, deliberately. A finished day with no
+  // HRV and no resting heart rate has no recovery signal in it either, and a
+  // rule that depends on what the UI happens to be doing behaves differently
+  // depending on when you look. `recoveryFor` shows the last scored day instead,
+  // labelled, which is the same answer `awaiting-night` already gives.
+  const deviationPresent = present.some(([key]) => key === "hrv" || key === "restingHr");
+  if (!deviationPresent) {
+    return {
+      state: "awaiting-readings",
+      score: null,
+      label: null,
+      nights: usableNights,
+      needed: BASELINE_NIGHTS,
+      terms,
+      readings: { hrv: today.hrv, restingHr: today.restingHr, sleep: today.sleep },
+    };
+  }
+
   const totalWeight = present.reduce((sum, [key]) => sum + RECOVERY_WEIGHTS[key], 0);
   const weighted = present.reduce(
     (sum, [key, value]) => sum + RECOVERY_WEIGHTS[key] * value,
@@ -1088,6 +1119,12 @@ export function recoveryExplanation(result) {
   // what is wrong: nothing is.
   if (result.state === "awaiting-night") {
     return "Recovery is scored from your night. Nothing to score until you have slept.";
+  }
+  // Reachable only when there is no earlier day to fall back to either. Names
+  // what is missing rather than implying a fault: the readings exist on the
+  // strap, they have not been collected yet.
+  if (result.state === "awaiting-readings") {
+    return "Waiting on today's HRV and resting heart rate from the strap.";
   }
 
   const { deviations, terms } = result;

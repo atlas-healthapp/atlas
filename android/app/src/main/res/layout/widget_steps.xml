@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Steps at 2x2: the count, the goal, the day's shape, the fill.
+
+     The header carries the metric and the refresh and nothing else. At this
+     width there is no room for the wordmark and the sync time as well, and the
+     user's own rule decides which goes: the logo before the control.
+
+     The same two RemoteViews rules the notification paid for apply here. A plain
+     View is not on the inflatable whitelist, so anything decorative is an
+     ImageView; and ?android:attr colours resolve against the inflating context,
+     which is the launcher's, so every colour is an own resource. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/steps_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <TextView
+            android:id="@+id/steps_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_steps_label" />
+
+        <!-- **No negative margins.** They pulled part of this 34dp target outside
+             the parent row, and Android does not deliver a touch outside a
+             parent's bounds - so the glyph drew correctly, absorbed nothing, and
+             the tap fell through to the card, which opened the app. Reported as
+             "the refresh button does nothing".
+
+             34dp of target around an 18dp glyph. The whole card is tappable too,
+             so the two must not be a coin toss. -->
+
+        <!-- A spacer, weighted, because the wordmark has to sit BETWEEN the
+             metric and the stamp rather than beside the metric - set flush
+             against a word, the mark is read as a letter of it. TextView rather
+             than Space: a plain View is not on the RemoteViews whitelist, which
+             the notification learned by being killed for it. -->
+        <TextView
+            android:id="@+id/steps_gap_a"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no" />
+
+        <!-- **The wordmark appears when there is room and goes when there is
+             not.** Three slots need three slots' worth of width; below that the
+             wordmark is the first thing to go, then the stamp, and the metric
+             and the refresh are what a narrow widget keeps. -->
+        <TextView
+            android:id="@+id/steps_mark"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_wordmark"
+            android:visibility="gone" />
+
+        <!-- A spacer, weighted, because the wordmark has to sit BETWEEN the
+             metric and the stamp rather than beside the metric - set flush
+             against a word, the mark is read as a letter of it. TextView rather
+             than Space: a plain View is not on the RemoteViews whitelist, which
+             the notification learned by being killed for it. -->
+        <TextView
+            android:id="@+id/steps_gap_b"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no" />
+
+        <ImageView
+            android:id="@+id/steps_refresh"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:padding="8dp"
+            android:src="@drawable/ic_widget_refresh"
+            android:contentDescription="@string/widget_refresh" />
+
+        <!-- It has to whir. An indeterminate ProgressBar is the only thing in
+             the RemoteViews whitelist that actually animates, and a control with
+             no motion is a control that reads as broken however well it works. -->
+        <ProgressBar
+            android:id="@+id/steps_spinner"
+            style="?android:attr/progressBarStyleSmall"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:padding="8dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/widget_activity"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="2dp"
+        android:baselineAligned="true">
+
+        <TextView
+            android:id="@+id/steps_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:includeFontPadding="false"
+            android:textColor="@color/widget_ink" android:text="@string/widget_sample_steps"
+            />
+
+        <TextView
+            android:id="@+id/steps_goal"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="5dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim" android:text="@string/widget_sample_steps_goal"
+            />
+    </LinearLayout>
+
+    <!-- The day so far. Weighted so the chart takes whatever height is left
+         after the figures, which is what lets one layout hold at 2x2 and taller
+         without stretching the type. -->
+    <ImageView
+        android:id="@+id/steps_chart"
+        android:src="@drawable/widget_preview_steps"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="6dp"
+        android:adjustViewBounds="false"
+        android:scaleType="fitXY"
+        android:importantForAccessibility="no" />
+
+    <!-- **Drawn, not a ProgressBar.** A horizontal ProgressBar carries the
+         platform's own insets inside its bounds, so its track started a few
+         pixels in from the edge of the card while the chart directly above it
+         spanned the full width - reported twice as the chart being misaligned,
+         when it was the gauge that was inset. Removing the bitmap's own padding
+         fixed half of it and this fixes the rest. It also makes every mark in
+         the set the same object drawn the same way: see Spark.bar, which the
+         dials and the stage rows already use. -->
+    <ImageView
+        android:id="@+id/steps_bar"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_marginTop="8dp"
+        android:scaleType="fitXY"
+        android:importantForAccessibility="no"
+        android:src="@drawable/widget_preview_bar_activity" />
+    <!-- **The stamp lives in the footer, and that is the set's rule.** It sat in
+         the header on this card while SLEEP and TODAY had it below, which read
+         as three widgets from three different apps. It is also what lets the
+         wordmark be centred at all: SYNCED 14:32 is far wider than the metric
+         name, so a mark placed between them could only ever sit left of centre.
+
+         The filler above it owns the slack, so the stamp is on the floor of the
+         card at every height rather than riding up under the content. -->
+    <TextView
+        android:id="@+id/steps_filler"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:importantForAccessibility="no" />
+
+    
+    <!-- **The footer is one row with two ends.** The battery sits bottom left
+         and the sync stamp bottom right, because they answer one question
+         between them - is this reading current, and will the next one arrive -
+         and reading them as one run of text made the stamp harder to find. Equal
+         weights, so neither end moves when the other's string changes length. -->
+    <LinearLayout
+        android:id="@+id/steps_footer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:baselineAligned="true"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/steps_battery"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="start"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_battery" />
+
+        <TextView
+            android:id="@+id/steps_synced"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:gravity="end"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_sample_synced" />
+    </LinearLayout>
+</LinearLayout>

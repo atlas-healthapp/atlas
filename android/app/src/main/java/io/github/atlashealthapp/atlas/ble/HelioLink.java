@@ -252,6 +252,38 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
         }
 
         final java.util.Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+
+        // **A device the user picked outranks every name rule below.** Names are
+        // not a reliable identifier, and no name rule can be widened far enough
+        // to cover an arbitrary one without also matching somebody's earbuds,
+        // which is the one thing a Bluetooth connect must never do. So the
+        // choice is the user's rather than a guess. See KEY_STRAP_ADDRESS.
+        final String chosen = context
+                .getSharedPreferences(HelioSyncService.PREFS, android.content.Context.MODE_PRIVATE)
+                .getString(HelioSyncService.KEY_STRAP_ADDRESS, null);
+        if (chosen != null && !chosen.isEmpty()) {
+            // **Resolved by address, not looked up among the bonds.** A BLE device
+            // can be connected without ever having been bonded, and such a strap
+            // never appears in getBondedDevices at all - so searching the bond set
+            // would reject the very device the picker exists to let somebody
+            // choose. getRemoteDevice works for any valid address regardless of
+            // bond state, which is also what connectGatt needs.
+            try {
+                final BluetoothDevice device = adapter.getRemoteDevice(chosen);
+                if (device != null) {
+                    log("using the device you chose: \""
+                            + (device.getName() == null ? chosen : device.getName()) + "\"");
+                    return device;
+                }
+            } catch (final IllegalArgumentException e) {
+                // Only reachable if the stored string is not a MAC address at all.
+                // Said out loud rather than silently falling through to the name
+                // rules, because "what I picked is wrong" and "I never picked" want
+                // different things from the person reading this.
+                log("! the device you chose is not a valid address, ignoring it");
+            }
+        }
+
         BluetoothDevice loose = null;
         for (final BluetoothDevice device : bonded) {
             final String name = device.getName();

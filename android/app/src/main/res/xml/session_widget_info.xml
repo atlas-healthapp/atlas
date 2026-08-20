@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Four by one is the natural size: a clock, a line about it, and a heart
+     rate. Resizable taller, where the heart-rate line and the footer appear. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="80dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="60dp"
+    android:maxResizeHeight="260dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_session"
+    android:previewLayout="@layout/widget_session"
+    android:description="@string/widget_session_description"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

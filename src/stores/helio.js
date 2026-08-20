@@ -9,9 +9,12 @@ import {
   normaliseSamples,
   normaliseWorkouts,
   decodeSleepBlobs,
+  decodeNapBlobs,
+  EARLIEST_PLAUSIBLE,
+  FUTURE_TOLERANCE_MS,
 } from "@/sources/helioBleSource";
 import { ingestSamples, commitSleepSessions, commitWorkouts } from "@/utils/sampleIngest";
-import { clearWorkouts, newestWorkoutStart } from "@/utils/sampleDb";
+import { clearWorkouts, newestWorkoutStart, purgeImplausible } from "@/utils/sampleDb";
 import { backfillRollupKeys, rescopeRestingHrToNights } from "@/utils/dailyRollup";
 import { repeatMask } from "@/utils/strapAlarm";
 
@@ -32,9 +35,17 @@ const CONNECTED_KEY = "atlas_helio_connected";
 const LAST_SYNC_KEY = "atlas_helio_last_sync";
 // How stale the data has to be before a resume or a tick actually talks to the
 // strap. Unlocking the phone fires resume every time, and a BLE sync wakes the
-// band and spends its battery; five minutes is well inside "the number on
-// screen is current" while collapsing a burst of unlocks into one sync.
-const REFRESH_MIN_AGE_MS = 5 * 60 * 1000;
+// band and spends its battery, so a burst of unlocks has to collapse into one
+// sync.
+//
+// **Ten minutes, up from five on 2026-08-19**: reported as the app seeming to
+// sync on every open. Five was chosen against "the number on screen is current"
+// alone, and that was the wrong side of the trade - the background service is
+// also running its own schedule and its drains move this same clock, so the
+// figures do not go stale while the app sits closed. What ten buys is a strap
+// that is left alone. A pull-to-refresh still ignores this entirely, which is
+// the deliberate way to say "no, now".
+const REFRESH_MIN_AGE_MS = 10 * 60 * 1000;
 
 /**
  * How many refresh decisions to keep, and where.
@@ -94,6 +105,7 @@ const WORKOUT_TZ_FIX_KEY = "atlas_helio_workout_tz_fixed_2026_07_28";
 // One-off: fills `hr` into rollups frozen before heart rate had one of its own.
 const HR_ROLLUP_BACKFILL_KEY = "atlas_hr_rollup_backfill_2026_08_06";
 const RESTING_HR_NIGHT_SCOPE_KEY = "atlas_resting_hr_night_scope_2026_08_14";
+const SAMPLE_PURGE_KEY = "atlas_sample_purge_2026_08_19";
 // The deep fetch, and the version of the record it was last run for.
 //
 // A night is committed once and then only ever re-asked for by a fetch that
@@ -112,7 +124,33 @@ const RESTING_HR_NIGHT_SCOPE_KEY = "atlas_resting_hr_night_scope_2026_08_14";
 // (see the fourth guard in commitSleepSessions), so the nights the strap still
 // holds are asked for again now that the guard is in place to keep the better
 // telling of each.
-const DEEP_FETCH_VERSION = 3;
+//
+// Bumped to 4 on 2026-08-18, and this is the case the rule above was written
+// for. `commitSleepSessions` learned `naps`, and naps are only collected from
+// sessions the band hands over in a fetch - a routine two-day sync never
+// re-delivers an afternoon sleep from last week, and nothing reprocesses what is
+// already stored. So the feature shipped and showed nothing, on a phone with two
+// naps in the last three days. The rule was written down after the same mistake
+// left thirteen nights with a bedtime and no sleeping heart rate; it is easy to
+// miss precisely because everything looks fine until somebody reads the device.
+// 5 on 2026-08-18: the nap window itself was wrong, so the sessions fetched
+// under 4 were offered and rejected. They have to be asked for again.
+// 6 on 2026-08-18, and this is the one that actually collects them: naps were
+// never separate sessions at all, they ride in a block inside the night record
+// (see decodeNaps). Every night already stored was committed by a build that
+// did not read those bytes, so the whole window has to be asked for once more.
+// 7 on 2026-08-18: naps learned their stages. The band keeps a SECOND timeline
+// in the same segment array (see decodeNaps), so the nights fetched an hour ago
+// under 6 stored naps with no stages in them.
+// 8 on 2026-08-19: the nap rule gained the one-hour gap, so every nap already
+// stored has to be offered again for the rejected ones to be cleared. A routine
+// sync would reach the last few days on its own; this reaches the fortnight the
+// NAPS card draws.
+// 9 on 2026-08-19: clearing now reconsiders every date the batch covers rather
+// than only the dates that still carry a nap, because the band revises a record
+// and drops one. A routine sync reaches today; this reaches the fortnight the
+// NAPS card draws, where a stale nap would otherwise sit until it aged out.
+const DEEP_FETCH_VERSION = 9;
 const DEEP_FETCH_KEY = "atlas_helio_deep_fetch_version";
 /** How deep that fetch goes. Whatever the band still holds inside it, which
  *  measured as 13 nights of sleep sessions on 2026-08-04, not 30. */
@@ -122,6 +160,20 @@ export const useHelioStore = defineStore("helio", () => {
   const connected = ref(load(CONNECTED_KEY, false));
   const authKey = ref(load(AUTH_KEY_KEY, ""));
   const syncing = ref(false);
+  /**
+   * True while the native cache is being read into the archive.
+   *
+   * **Separate from `syncing`, and the reason this exists.** `syncing` covers the
+   * BLE conversation, which is set several awaits inside `sync()`. The drain is
+   * neither: it is a local read of work the service already did, and it runs on
+   * the rate-limited path where `sync()` is never called at all. So opening the
+   * app within five minutes of a background sync ingested tens of thousands of
+   * samples with nothing anywhere saying so - and since the ingest is the part
+   * that actually moves the numbers, Recovery changed under the reader while the
+   * header said SYNCED 09:17 and had never said SYNCING.
+   */
+  const draining = ref(false);
+
   const lastSyncAt = ref(load(LAST_SYNC_KEY, null));
   const battery = ref(load(BATTERY_KEY, null));
   const lastSyncError = ref(null);
@@ -253,6 +305,99 @@ export const useHelioStore = defineStore("helio", () => {
       // right here: a browser cannot grant an Android permission, so warning
       // about one would be noise nobody can act on.
       exactAlarm.value = { granted: true, askable: false };
+    }
+  }
+
+  /**
+   * Every Bluetooth device bonded to this phone, so somebody can say which is
+   * the strap when the name rules have failed to work it out.
+   *
+   * **Atlas does not guess.** `likelyStrap` only reports whether the native name
+   * matcher recognised the name, which by definition it did not for anybody
+   * seeing this list, so it orders the list and decides nothing. The plausible
+   * guesses and somebody's earbuds are the same shape, and connecting to the
+   * wrong one is worse than asking.
+   *
+   * Returns `supported: false` off-device, where there is no adapter to ask.
+   */
+  /**
+   * The newest live heart rate the background service has streamed.
+   *
+   * **Read, never opened.** The app used to start its own stream for the session
+   * sheet, which meant two processes reaching for a strap that takes one BLE
+   * central at a time. The service won, so the sheet sat on READING THE STRAP
+   * forever and the app's own sync failed link-busy while the shade showed a
+   * perfectly good reading. One owner of the radio, and every surface reads what
+   * it publishes.
+   *
+   * Returns nulls off-device and before the first reading, which a caller shows
+   * as "connecting" rather than as a failure.
+   */
+  async function liveHeartRateReading() {
+    try {
+      const res = await HelioBle.liveHeartRate();
+      return {
+        bpm: Number.isFinite(res?.bpm) ? res.bpm : null,
+        at: Number.isFinite(res?.at) ? res.at : null,
+      };
+    } catch {
+      return { bpm: null, at: null };
+    }
+  }
+
+  /**
+   * Every live reading the service kept during the session in progress.
+   *
+   * Returned as `{t, v}` to match the archive's own shape, so a caller can merge
+   * the two without knowing which came from where.
+   */
+  async function sessionHeartTrail() {
+    try {
+      const res = await HelioBle.sessionHeartTrail();
+      return (res?.trail ?? [])
+        .map((point) => ({ t: Number(point?.[0]), v: Number(point?.[1]) }))
+        .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v) && p.v > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Start a fresh trail. A trail belongs to one session. */
+  async function clearSessionHeartTrail() {
+    try {
+      await HelioBle.clearSessionHeartTrail();
+    } catch {
+      // No plugin, or an older build. The trail simply stays empty.
+    }
+  }
+
+  async function listBondedDevices() {
+    try {
+      const res = await HelioBle.listBondedDevices();
+      return {
+        supported: res?.supported !== false,
+        enabled: res?.enabled !== false,
+        devices: Array.isArray(res?.devices) ? res.devices : [],
+      };
+    } catch {
+      return { supported: false, enabled: false, devices: [] };
+    }
+  }
+
+  /**
+   * Remember which bonded device is the strap, by address, or clear it with a
+   * falsy address so the name rules take over again.
+   *
+   * **Clearing has to exist.** A wrong pick persists across restarts exactly as
+   * well as a right one, so without a way out it would be a permanent fault
+   * fixable only by reinstalling, which on Atlas costs the whole archive.
+   */
+  async function setStrapAddress(address) {
+    try {
+      await HelioBle.setStrapAddress({ address: address || "" });
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -420,12 +565,13 @@ export const useHelioStore = defineStore("helio", () => {
     // central at a time, so the deep fetch lost the race and returned null -
     // which is also what a refused link returns, so nothing could tell the
     // difference and the flag simply stayed unset every launch.
-    const deepOwed = load(DEEP_FETCH_KEY, 0) < DEEP_FETCH_VERSION;
+    const deepOwed = deepFetchOwed();
     const askDays = deepOwed ? Math.max(days, DEEP_FETCH_DAYS) : days;
 
     const checkin = useCheckinStore();
     const collectedSamples = [];
     const collectedSleep = [];
+    const collectedNaps = [];
     const collectedWorkouts = [];
 
     return new Promise((resolve, reject) => {
@@ -480,7 +626,7 @@ export const useHelioStore = defineStore("helio", () => {
           // Sleep is committed before any IndexedDB work, exactly as the
           // Gadgetbridge path does it, so a storage failure can never regress a
           // value that is already on the rings.
-          const sleepDates = commitSleepSessions(collectedSleep, checkin);
+          const sleepDates = commitSleepSessions(collectedSleep, checkin, collectedNaps);
           const samples = normaliseSamples(collectedSamples);
           const workouts = normaliseWorkouts(collectedWorkouts);
 
@@ -527,6 +673,11 @@ export const useHelioStore = defineStore("helio", () => {
           syncPhase.value = `READING SAMPLES · ${collectedSamples.length}`;
         } else if (event.event === "sleepSessions") {
           collectedSleep.push(...decodeSleepBlobs(event.sessions));
+          // Read off the same blobs rather than off the decoded nights, because
+          // a nap-only day arrives as a record with no night in it - see
+          // decodeNaps. The count is the nights, which is what the phase line
+          // has always meant.
+          collectedNaps.push(...decodeNapBlobs(event.sessions));
           syncPhase.value = `READING SLEEP · ${collectedSleep.length}`;
         } else if (event.event === "workouts") {
           collectedWorkouts.push(...(event.workouts ?? []));
@@ -618,23 +769,62 @@ export const useHelioStore = defineStore("helio", () => {
     // something back. The notification reads the service's figure, so the two
     // disagreed by hours and the shade was the one telling the truth.
     const serviceSyncedAt = Number(drained?.serviceSyncedAt ?? 0);
-    if (serviceSyncedAt > (lastSyncAt.value ?? 0)) {
-      lastSyncAt.value = serviceSyncedAt;
-      persist(LAST_SYNC_KEY, lastSyncAt.value);
-    }
+    const noteServiceRun = () => {
+      if (serviceSyncedAt > (lastSyncAt.value ?? 0)) {
+        lastSyncAt.value = serviceSyncedAt;
+        persist(LAST_SYNC_KEY, lastSyncAt.value);
+      }
+    };
 
     const rawSamples = drained?.samples ?? [];
     const rawSessions = drained?.sessions ?? [];
     const rawWorkouts = drained?.workouts ?? [];
-    if (!rawSamples.length && !rawSessions.length && !rawWorkouts.length) return null;
+    // Nothing came back, so there is nothing to ingest and the service's own run
+    // is the whole truth. Recorded here, which is the case the timestamp was
+    // added for: a background sync that found nothing still talked to the strap.
+    if (!rawSamples.length && !rawSessions.length && !rawWorkouts.length) {
+      noteServiceRun();
+      return null;
+    }
 
     const checkin = useCheckinStore();
-    // Sleep first, as everywhere else, so a storage failure cannot regress a
-    // value that is already on the rings.
-    const sleepDates = commitSleepSessions(decodeSleepBlobs(rawSessions), checkin);
-    const samples = normaliseSamples(rawSamples);
-    const touched = await ingestSamples(samples, SOURCE_ID);
-    const workoutDates = await commitWorkouts(normaliseWorkouts(rawWorkouts));
+    // **Flagged for the whole ingest, and the stamp waits for it.** Both halves
+    // fix the same complaint: the app said SYNCED 09:17 while the 09:17 data was
+    // still in the native cache, then Recovery jumped once it landed. Claiming a
+    // time before the readings it describes have been stored is the app being
+    // fresher in the header than it is on the screen.
+    let sleepDates;
+    let samples;
+    let touched;
+    let workoutDates;
+    draining.value = true;
+    try {
+      // Sleep first, as everywhere else, so a storage failure cannot regress a
+      // value that is already on the rings.
+      sleepDates = commitSleepSessions(
+        decodeSleepBlobs(rawSessions),
+        checkin,
+        decodeNapBlobs(rawSessions)
+      );
+      samples = normaliseSamples(rawSamples);
+      // **The drain counts, exactly as the sync does.** It was a bare UPDATING
+      // for however long the ingest took, which after a night of background
+      // syncs is tens of thousands of readings, and it runs BEFORE the strap is
+      // touched - so opening the app in the morning showed a motionless
+      // UPDATING, then WAKING THE STRAP, then the real work. Reported as "it
+      // said updating for so long whilst not saying it was doing anything".
+      // `ingestSamples` already takes this callback and the sync path already
+      // passes one; this path simply never did.
+      syncPhase.value = `UPDATING · ${samples.length} READINGS`;
+      touched = await ingestSamples(samples, SOURCE_ID, (done, total) => {
+        syncPhase.value = `UPDATING · ${done} OF ${total}`;
+      });
+      syncPhase.value = "UPDATING · SESSIONS";
+      workoutDates = await commitWorkouts(normaliseWorkouts(rawWorkouts));
+    } finally {
+      syncPhase.value = null;
+      draining.value = false;
+    }
 
     lastSyncAt.value = Date.now();
     persist(LAST_SYNC_KEY, lastSyncAt.value);
@@ -747,7 +937,7 @@ export const useHelioStore = defineStore("helio", () => {
    * ends up flickering back a beat before the other, which is the class of bug
    * this whole session started with.
    */
-  const busy = computed(() => syncing.value || connecting.value);
+  const busy = computed(() => syncing.value || connecting.value || draining.value);
 
   async function connect(key) {
     if (key) setAuthKey(key);
@@ -788,6 +978,10 @@ export const useHelioStore = defineStore("helio", () => {
     // band being connected.
     await backfillHeartRateRollups();
     await rescopeRestingHr();
+    // Before the strap check, like the repairs above it: clearing readings that
+    // cannot be real owes nothing to whether a band is paired, and somebody who
+    // has restored a backup onto a fresh phone has the junk without the strap.
+    await purgeImplausibleSamples();
     if (!connected.value) return;
     await migrateWorkoutTimezoneFix();
     await hydrate();
@@ -877,9 +1071,41 @@ export const useHelioStore = defineStore("helio", () => {
     }
   }
 
+  /**
+   * Is a deep fetch still owed? Read live rather than captured, because the flag
+   * is cleared by whichever sync completes one and this is asked on every
+   * refresh.
+   */
+  function deepFetchOwed() {
+    return load(DEEP_FETCH_KEY, 0) < DEEP_FETCH_VERSION;
+  }
+
   async function runRefresh({ force, trigger }) {
+    // **Drain before judging how stale we are, not after.**
+    //
+    // The service's own runs move `lastSyncAt`, but only through `noteServiceRun`
+    // inside the drain - so measuring age first asks a clock that has not yet
+    // heard about the sync the background service just did. Reported 2026-08-19:
+    // pressing a widget's refresh, waiting, then opening Atlas showed it syncing
+    // again every single time, however long the wait, because the widget's sync
+    // was the service's and the app had no idea it had happened.
+    //
+    // The drain is not the thing the rate limit protects against. It is a local
+    // read of work already done and paid for, which is the same reason the
+    // declined path below drains before giving up.
+    if (!force) await drainBackground().catch(() => null);
+
     const age = lastSyncAt.value ? Date.now() - lastSyncAt.value : Infinity;
-    if (!force && age < REFRESH_MIN_AGE_MS) {
+    // **A deep fetch is exempt from the rate limit, or it can be starved for
+    // good.** The limit is measured against `lastSyncAt`, which the background
+    // service also moves - through its own runs and through every drain - so on
+    // a phone whose service is running normally the app's own sync is refused
+    // every single time. Every trail line across an hour read
+    // `declined: synced Ns ago` while a bumped DEEP_FETCH_VERSION sat unfetched,
+    // and only a pull-to-refresh broke out of it. The battery argument the limit
+    // exists for does not apply here: this runs once per version bump, not once
+    // per unlock, and until it runs the reason for the bump is not on the phone.
+    if (!force && !deepFetchOwed() && age < REFRESH_MIN_AGE_MS) {
       // Drain first, THEN give up. The rate limit exists to protect the strap's
       // battery from a BLE connect on every resume, and draining the native cache
       // is neither: it is a local read of work the background service has already
@@ -890,11 +1116,17 @@ export const useHelioStore = defineStore("helio", () => {
       // pull-to-refresh forced it. The service collects into a cache only the
       // WebView can read, so anything it found inside the last five minutes sat
       // there unread.
-      await drainBackground().catch(() => null);
       noteRefresh(trigger, `declined: synced ${Math.round(age / 1000)}s ago`);
-      return "SYNCED IN THE LAST FIVE MINUTES";
+      return "SYNCED IN THE LAST TEN MINUTES";
     }
-    noteRefresh(trigger, force ? "syncing (forced)" : `syncing, ${Math.round(age / 1000)}s since last`);
+    noteRefresh(
+      trigger,
+      force
+        ? "syncing (forced)"
+        : deepFetchOwed()
+          ? `syncing (deep fetch owed), ${Math.round(age / 1000)}s since last`
+          : `syncing, ${Math.round(age / 1000)}s since last`
+    );
 
     // The band takes one central at a time, so a live heart-rate stream blocks
     // a sync outright: the plugin rejects with LINK_BUSY and the sync quietly
@@ -983,6 +1215,39 @@ export const useHelioStore = defineStore("helio", () => {
     }
   }
 
+  /**
+   * Clear out readings whose timestamps cannot be real.
+   *
+   * **Everybody who synced before the ingest guard has some**, which is why this
+   * is a migration rather than a one-off repair: the archive it was found in
+   * held 155, all `hrv`, dated 1973 to 2106, and they had frozen 75 rollup rows
+   * for dates that do not exist. Nothing reads them - a date nobody has never
+   * gets asked for - but they are exported in every backup, counted wherever the
+   * app reports how many readings it holds, and they make the archive's own
+   * bounds a lie.
+   *
+   * Deleting is the one thing in here that cannot be undone, so the window is
+   * the same one `normaliseSamples` refuses on rather than a second opinion, and
+   * the count is recorded rather than swallowed.
+   */
+  async function purgeImplausibleSamples() {
+    if (load(SAMPLE_PURGE_KEY, false)) return;
+    try {
+      const removed = await purgeImplausible(EARLIEST_PLAUSIBLE, Date.now() + FUTURE_TOLERANCE_MS);
+      persist(SAMPLE_PURGE_KEY, true);
+      // Recorded in the same log COPY DETAILS renders, so a purge is something
+      // somebody can see happened rather than data quietly going missing.
+      if (removed.samples || removed.rollups) {
+        const at = new Date().toLocaleTimeString("en-GB", { hour12: false });
+        logLines.value.push(
+          `${at} purged ${removed.samples} impossible readings and ${removed.rollups} rollups`
+        );
+      }
+    } catch {
+      // Retried on the next launch.
+    }
+  }
+
   return {
     connected,
     authKey,
@@ -993,6 +1258,7 @@ export const useHelioStore = defineStore("helio", () => {
     battery,
     lastCounts,
     syncPhase,
+    draining,
     connecting,
     busy,
     logLines,
@@ -1005,6 +1271,11 @@ export const useHelioStore = defineStore("helio", () => {
     exactAlarm,
     checkExactAlarm,
     requestExactAlarm,
+    liveHeartRateReading,
+    sessionHeartTrail,
+    clearSessionHeartTrail,
+    listBondedDevices,
+    setStrapAddress,
     noteRefresh,
     startLiveHeartRate,
     stopLiveHeartRate,

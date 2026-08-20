@@ -42,8 +42,44 @@
     @close="ui.closeCreate()"
   />
 
-  <ManualSessionSheet
+  <!-- **The ACTIVITY node starts one now; recording one you already did is a row
+       inside it.** Starting is the common case and typing in times afterwards is
+       the rare one, so they are not siblings. This is the same shape MealPickSheet
+       uses for SCAN and QUICK ADD, and for the same reason `CreateFab`'s own notes
+       give: giving the rarest ways in the same billing as the commonest is the
+       mistake those two were moved off the arc to fix. -->
+  <!-- **Starting does not move the tab, and that is not an exception to the rule
+       above, it is the rule.** The tab moves once something has been *added*, and
+       starting a session adds nothing: it is still running, there is nothing on
+       FITNESS to go and look at, and the running row now appears under the header
+       of every tab, so being sent anywhere to see it is pointless. You press START
+       on the way out of the door and should be left where you were.
+
+       Stopping still lands on FITNESS, because that is the moment a session
+       actually joins the list. -->
+  <SessionSheet
     v-else-if="ui.createSheet === 'add-activity'"
+    @started="ui.closeCreate()"
+    @stopped="onStopped"
+    @record-earlier="ui.openCreateSheet('log-past-activity')"
+    @close="ui.closeCreate()"
+  />
+
+  <!-- **STOP lands here rather than closing.** A session that recorded itself and
+       vanished gave you nothing to check, no way to correct a type chosen before
+       you started, and no way to change your mind. It is mounted beside the
+       others rather than inside SessionSheet so it survives that sheet closing,
+       which is what STOP does. -->
+  <SessionRecapSheet
+    v-else-if="ui.createSheet === 'session-recap' && recap"
+    :start-millis="recap.startMillis"
+    :active-seconds="recap.activeSeconds"
+    @close="finishRecap"
+    @discarded="finishRecap"
+  />
+
+  <ManualSessionSheet
+    v-else-if="ui.createSheet === 'log-past-activity'"
     @saved="landOn('activity')"
     @close="ui.closeCreate()"
   />
@@ -63,7 +99,7 @@
 // **The tab moves once, after something is added.** That is the moment it is
 // worth showing, and it is the only moment: cancelling leaves you exactly where
 // you were.
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useUIStore } from "@/stores/ui";
 import { useFoodStore } from "@/stores/food";
 import { today } from "@/utils/date";
@@ -72,8 +108,35 @@ import ItemFormSheet from "@/components/food/ItemFormSheet.vue";
 import BatchScanSheet from "@/components/food/BatchScanSheet.vue";
 import EstimateSheet from "@/components/food/EstimateSheet.vue";
 import ManualSessionSheet from "@/components/activity/ManualSessionSheet.vue";
+import SessionSheet from "@/components/activity/SessionSheet.vue";
+import SessionRecapSheet from "@/components/activity/SessionRecapSheet.vue";
 
 const ui = useUIStore();
+
+/**
+ * The session STOP just recorded, held while its recap is open.
+ *
+ * A plain ref rather than something on the store: it is alive for exactly as long
+ * as one sheet, and the store already carries the session itself.
+ */
+const recap = ref(null);
+
+function onStopped(result) {
+  // Null when the session was under a minute and discarded rather than stored.
+  // Nothing to recap, so it behaves as it always did.
+  if (!result) {
+    landOn("activity");
+    return;
+  }
+  recap.value = result;
+  ui.openCreateSheet("session-recap");
+}
+
+/** Close the recap and land on FITNESS, where the session now is. */
+function finishRecap() {
+  recap.value = null;
+  landOn("activity");
+}
 const food = useFoodStore();
 
 // Whatever day the diary is browsing, or today when it has not been opened yet
@@ -103,7 +166,10 @@ function onPick(itemId, quantity, mealType) {
 
 /** A batch that made a meal logs it, same as any other way of adding one. */
 function onBatchCreated({ mealId }) {
-  if (mealId) food.addSnack(date.value, mealId, 1, ui.createMealType ?? "snack");
+  // **No `?? "snack"`.** `addSnack` buckets an unstated section by the clock, and
+  // hardcoding one here defeated that: anything added without choosing a section
+  // landed in SNACKS whatever time it was.
+  if (mealId) food.addSnack(date.value, mealId, 1, ui.createMealType ?? undefined);
   landOn("food");
 }
 
@@ -121,7 +187,11 @@ function landOnLibrary() {
 function onScanned(result) {
   // A scan that created something logs it where you said it was going. An edit
   // of an existing item has no new id and nothing to log.
-  if (result?.newId) food.addSnack(date.value, result.newId, 1, ui.createMealType ?? "snack");
+  // Reported: "when I scan without picking a type it defaults to snack". The
+  // library item is right - every scan path makes a `meal` - it was the logged
+  // entry landing in the wrong section. Same fix as above: let addSnack read the
+  // clock, so a sandwich scanned at 12:30 goes to LUNCH.
+  if (result?.newId) food.addSnack(date.value, result.newId, 1, ui.createMealType ?? undefined);
   landOn("food");
 }
 </script>

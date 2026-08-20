@@ -11,6 +11,16 @@
          Android WebView, and the chip is absent during boot. -->
     <div class="hd">
       <div class="logo wordmark">
+        <!-- **A hidden strut, which is what holds the row's height open.**
+             `.wordmark` is `inline-flex`, so its height comes from its flex
+             items rather than from `line-height`, and during boot it starts with
+             no items at all. A fixed pixel height used to stand in for them, and
+             that was wrong on the device: 21px is what Chromium computes for this
+             face and Android's WebView computes 18.5, so pinning the number made
+             Home the odd one out on the only screen that matters. A strut is the
+             same text in the same font, so it measures whatever the device says
+             and cannot disagree with the other three tabs. -->
+        <span class="strut" aria-hidden="true">A</span>
         <!-- The peak lands on the tick the first character used to, then TLAS
              types after it: it is what the boot is building toward, so it
              arrives first rather than being typed like a letter. -->
@@ -44,6 +54,11 @@
       </button>
       <div v-if="playBoot" class="sys mono">{{ bootLine }}</div>
     </div>
+
+    <!-- Under the header line, the same place every other tab puts it. It was
+         below the dials, which made the one global element in the app sit
+         somewhere different on the one screen people open first. -->
+    <RunningSessionRow v-if="!playBoot" />
 
     <!-- **The boot waits here for the archive, and this is what it waits on.**
          The sequence used to run a fixed 2.2 seconds and hand over regardless, so
@@ -86,6 +101,7 @@
         @click.stop="dialTap(() => openDial(d))"
       />
     </div>
+
 
     <HomeCard
       title="TODAY"
@@ -155,7 +171,7 @@
           :label="row.label"
           :value="
             row.key === 'stress'
-              ? stressZoneLabel(row.value)
+              ? stressZoneLabel(latestStress)
               : `${Math.round(row.value)}${row.unit}`
           "
           :tappable="canOpenVital(row.key)"
@@ -222,19 +238,12 @@
       <!-- Two rows rather than one. At a readable size the meal name and both
            buttons cannot share a line without the name truncating, and the
            name is the part you are deciding about. -->
-      <!-- No empty state. With the weekly schedule hidden there is no way to
-           create a plan, so "nothing scheduled" would be a permanent row
-           reporting the absence of a feature you cannot reach. -->
-      <div v-if="upNext" class="upnext">
-        <div class="upline">
-          <span class="t mono">{{ upNext.timeLabel }}</span>
-          <span class="meal">{{ upNext.name }}</span>
-        </div>
-        <div class="upacts">
-          <button class="swp mono" @click.stop="swapTarget = upNext.swap">SWAP</button>
-          <button class="cfm mono" @click.stop="upNext.confirm()">CONFIRM</button>
-        </div>
-      </div>
+      <!-- **Up Next is gone** (2026-08-18). It showed the first unconfirmed slot
+           of the day, and slots only ever came from the weekly template, which
+           has been removed: measured before removing it, the template held 0
+           items and 0 slots had ever been confirmed, against 118 logged entries.
+           So this had already been rendering nothing for a long time, and now it
+           cannot render anything by construction. -->
 
       <!-- Each of these draws only while its goal is being kept. A switched-off
            goal is null, not 0, so a row left in would read `3/nullL` and, on
@@ -275,19 +284,38 @@
       >
         <GoalDots :value="fibreTotal" :goal="GOALS.fibre" :color="famColor('fibre')" />
       </MetricRow>
+      <!-- **The one row on this card that is split** (option A of three, 2026-08-18).
+           Every other row here only navigates, so tapping it opens a page. This
+           one is also the log control - a tap takes your dose - which is why it
+           was the only metric with no way into its history.
+
+           The split is not a small button beside a big one: the mark column is
+           `flex: 1`, so the check AND its label are the log target, across the
+           full row height. The name and the chevron open the page. -->
       <MetricRow
         v-if="GOALS.creatine != null"
         label="CREATINE"
         :streak="streaks.creatine"
         :streak-color="famColor('creatine')"
         tappable
-        @click.stop="toggleCreatine"
+        @click.stop="openMetric = metricDef('creatine')"
       >
-        <BinaryCheck
-          :done="(entry.creatine ?? 0) >= GOALS.creatine"
-          :label="creatineLabel"
-          :color="famColor('creatine')"
-        />
+        <button
+          class="creatinetap"
+          type="button"
+          :aria-label="
+            (entry.creatine ?? 0) >= GOALS.creatine
+              ? 'Undo creatine'
+              : 'Log creatine'
+          "
+          @click.stop="toggleCreatine"
+        >
+          <BinaryCheck
+            :done="(entry.creatine ?? 0) >= GOALS.creatine"
+            :label="creatineLabel"
+            :color="famColor('creatine')"
+          />
+        </button>
       </MetricRow>
     </HomeCard>
 
@@ -349,12 +377,6 @@
       @close="routineOpen = false"
     />
     <MetricPage v-if="openMetric" :def="openMetric" from="HOME" @close="openMetric = null" />
-    <MealPickSheet
-      v-if="swapTarget"
-      :current-meal-id="swapTarget.mealId"
-      @close="swapTarget = null"
-      @pick="onSwapPick"
-    />
     <SleepPage v-if="sleepOpen" from="HOME" @close="sleepOpen = false" />
     <RecoveryPage v-if="recoveryOpen" :result="recovery" from="HOME" @close="recoveryOpen = false" />
     <StressPage v-if="stressOpen" from="HOME" @close="stressOpen = false" />
@@ -371,6 +393,8 @@ import { useLevelsStore } from "@/stores/levels";
 import { useProfileStore } from "@/stores/profile";
 import { useFoodStore } from "@/stores/food";
 import { useUIStore } from "@/stores/ui";
+import RunningSessionRow from "@/components/activity/RunningSessionRow.vue";
+import { useSessionsStore } from "@/stores/sessions";
 import { useHelioStore } from "@/stores/helio";
 import { today, addDays, fmtTime, fmtHoursMins } from "@/utils/date";
 import { dailyValuesForRange } from "@/utils/dailyRollup";
@@ -398,7 +422,7 @@ import StressPage from "@/components/body/StressPage.vue";
 import StressDay from "@/components/marks/StressDay.vue";
 import MetricPage from "@/components/metrics/MetricPage.vue";
 import { getSamples } from "@/utils/sampleDb";
-import { metric as metricDef } from "@/utils/metricRegistry";
+import { metric as metricDef, formatValue } from "@/utils/metricRegistry";
 import { zoneFor } from "@/components/body/stressDay";
 import QuickLogSheet from "@/components/home/QuickLogSheet.vue";
 import GoalBar from "@/components/marks/GoalBar.vue";
@@ -409,7 +433,7 @@ import CompositionBar from "@/components/marks/CompositionBar.vue";
 import SleepShape from "@/components/marks/SleepShape.vue";
 import MealPickSheet from "@/components/food/MealPickSheet.vue";
 import RoutineCard from "@/components/home/RoutineCard.vue";
-import { publishSummary, buildSummary } from "@/utils/nativeSummary";
+import { publishSummary, buildSummary, bucketSeries } from "@/utils/nativeSummary";
 import { routineStatus, routineTally } from "@/components/routine/routineModel";
 import { dialFor, resolveDials } from "@/components/home/dialModel";
 import { useHomeStore } from "@/stores/home";
@@ -478,15 +502,27 @@ async function loadWindow() {
   // deviation-only shape until this lands, which is a state it handles anyway.
   levels.ensure();
 }
+/** Arriving from the sleep widget, whose page Home owns. */
+function claimWidgetTarget() {
+  if (ui.claimOpen("sleep")) sleepOpen.value = true;
+}
+onMounted(claimWidgetTarget);
+onActivated(claimWidgetTarget);
+
 onMounted(loadWindow);
 onMounted(loadStress);
+// The widget's steps chart, on the same schedule as the stress row's: both are
+// today's raw samples, and both go stale the moment a sync lands.
+onMounted(loadSteps);
 // Home is inside KeepAlive and is the tab you return to, so a sync finished on
 // another tab has to be picked up on the way back.
 onActivated(loadStress);
+onActivated(loadSteps);
 // App.vue wraps the tabs in KeepAlive, so returning to Home does not remount.
 onActivated(loadWindow);
 // A sync finishing while Home is already the visible tab has to land too.
 watch(() => helio.lastSyncAt, loadWindow);
+watch(() => helio.lastSyncAt, loadSteps);
 
 // dailyValuesForRange nests the metrics under `values`, the same shape BodyTab
 // reads. Reading them flat off the row silently yields undefined for every
@@ -515,6 +551,25 @@ const dialKeys = computed(() =>
     return GOALS[key] != null;
   })
 );
+/**
+ * "OF 160G" for every dial that has a target, for the widget's sub-line.
+ *
+ * Formatted with the registry's own `formatValue`, which is what puts the unit
+ * on and converts it: a widget printing `OF 160` beside a screen reading `160G`,
+ * or printing kilograms at somebody set to pounds, is the drift that function
+ * exists to stop. Nothing on Home renders these.
+ */
+const dialSubs = computed(() => {
+  const out = {};
+  for (const key of dialKeys.value) {
+    const goal = GOALS[key] ?? metricDef(key)?.goal ?? null;
+    if (goal == null) continue;
+    const def = metricDef(key);
+    out[key] = `OF ${def ? formatValue(def, goal) : goal}`;
+  }
+  return out;
+});
+
 const dials = computed(() => {
   const tally = routineTally(habitsStore, todayKey.value);
   const bag = {
@@ -538,6 +593,13 @@ const dials = computed(() => {
     goals: GOALS,
     fixedGoals: { pai: metricDef("pai")?.goal ?? null },
     texts: { steps: stepsText.value },
+    // The hours, for the widget's sleep sub-line: the ring's own figure is the
+    // score, so this is the half of the night the figure is not saying.
+    sleepHoursText: entry.value.sleep ? fmtHoursMins(entry.value.sleep) : null,
+    // "OF 160G" per goal metric, formatted through the registry so a widget
+    // cannot invent a unit. Only the goal metrics get one - recovery and sleep
+    // have their own above, and the routine's "3/9" already carries its total.
+    subs: dialSubs.value,
   };
   return dialKeys.value.map((key) => dialFor(key, bag));
 });
@@ -630,6 +692,28 @@ const sleepText = computed(() => {
   return entry.value.sleep ? fmtHoursMins(entry.value.sleep) : "--";
 });
 
+/**
+ * The last seven nights' scores, oldest first, for the sleep widget's tallest
+ * size.
+ *
+ * **Scored through `sleepScoreFor` per night, not read off anything cached**,
+ * because that function is the single definition of a night's score and a
+ * second one computed here is exactly the drift it was extracted to stop. Each
+ * call is given that night's own `todayKey`, so its regularity window ends on
+ * the night being scored rather than on today.
+ *
+ * A night the band has nothing for stays null and draws as a gap. Zero would be
+ * a night scored nought, which is a different claim.
+ */
+const sleepTrend7 = computed(() =>
+  Array.from({ length: 7 }, (_, i) => {
+    const date = addDays(todayKey.value, -(6 - i));
+    const night = checkin.entryFor(date);
+    if (!night) return null;
+    return sleepScoreFor({ entries: checkin.entries, entry: night, todayKey: date });
+  })
+);
+
 // Protein stays additive: confirmed plan slots and snacks, plus a manual
 // override, so a day with no plan filled in can still be logged by hand.
 // The day's energy, for the calories dial. Same shape as protein and fibre:
@@ -652,25 +736,10 @@ const creatineLabel = computed(() =>
     : "NOT TAKEN"
 );
 
-// ── Up Next ───────────────────────────────────────────────────────────────
-const upNext = computed(() => {
-  const plan = food.planFor(todayKey.value);
-  const next = plan.slots.find((s) => !s.confirmed);
-  if (!next) return null;
-  const idx = plan.slots.indexOf(next);
-  return {
-    timeLabel: fmtTime(next.time),
-    name: next.name ?? food.itemById(next.mealId)?.name ?? "MEAL",
-    confirm: () => food.confirmSlot(todayKey.value, idx, true),
-    swap: { slotIndex: idx, mealId: next.mealId },
-  };
-});
-
-const swapTarget = ref(null);
-function onSwapPick(mealId, quantity) {
-  food.swapSlot(todayKey.value, swapTarget.value.slotIndex, mealId, quantity);
-  swapTarget.value = null;
-}
+// Up Next and its swap sheet were removed with the weekly template on
+// 2026-08-18. It read the first unconfirmed slot, and nothing creates a slot any
+// more. Worth noting it also called `food.planFor` from inside a computed, which
+// creates and persists a day plan as a side effect of rendering Home.
 
 // ── Quick log ─────────────────────────────────────────────────────────────
 // QuickLogSheet takes a field descriptor (or a list of them) and hands back
@@ -696,9 +765,52 @@ const { pull, refreshing, armed, note } = usePullToRefresh(scroller, async () =>
   // Returned, not swallowed: a refresh that declined to run says why, and the
   // indicator holds that line up for a moment instead of shutting silently.
   const reason = await helio.refresh({ force: true, trigger: "pull-home" }).catch(() => null);
-  await Promise.all([loadStress(), loadWindow()]);
+  await Promise.all([loadStress(), loadSteps(), loadWindow()]);
   return reason;
 });
+
+/**
+ * Today's steps, minute by minute, for the widget's own little chart.
+ *
+ * Loaded here rather than natively for the reason the whole summary exists:
+ * nothing native can reach IndexedDB. Alongside the stress load, which does the
+ * same thing for the same reason, and equally out of the boot's way.
+ */
+const stepSamples = ref([]);
+const hrSamples = ref([]);
+async function loadSteps() {
+  const start = new Date(`${today()}T00:00:00`).getTime();
+  try {
+    stepSamples.value = await getSamples("steps", start, start + 86400000);
+  } catch {
+    stepSamples.value = [];
+  }
+  try {
+    // The band reports heart rate about seven times a minute, so this is
+    // thousands of rows; it is bucketed to 48 points before it goes anywhere
+    // near the summary.
+    hrSamples.value = (await getSamples("hr", start, start + 86400000)).filter((s) => s.v > 0);
+  } catch {
+    hrSamples.value = [];
+  }
+}
+
+/**
+ * Today's heart rate as the widget draws it: 48 half-hourly means, with a
+ * half hour of one or two readings withheld rather than averaged.
+ *
+ * A computed of its own because two things read it now - the chart and the
+ * range printed under it - and a second call would be a second definition.
+ */
+const hrBuckets = computed(() =>
+  bucketSeries(hrSamples.value, {
+    from: new Date(`${todayKey.value}T00:00:00`).getTime(),
+    // The band reports about once a minute, so a worn half hour is around
+    // thirty. Five is generous enough to keep a genuinely short-worn stretch
+    // and mean enough to drop the single reading taken while handling it.
+    minSamples: 5,
+  })
+);
 
 // ── The mirror the native surfaces read ───────────────────────────────────
 // Home already computes every number the notification and the widget show, and
@@ -706,8 +818,12 @@ const { pull, refreshing, armed, note } = usePullToRefresh(scroller, async () =>
 // publishes them, and the native side only renders. Watched rather than pushed
 // on a timer: the numbers change when the numbers change.
 const habitsStore = useHabitsStore();
+const sessionsStore = useSessionsStore();
 const nativeSummary = computed(() => {
   const tally = routineTally(habitsStore, todayKey.value);
+  // The running session, resolved to a NAME here because nothing native can
+  // look up a type id: the type library lives in localStorage.
+  const running = sessionsStore.running;
   return buildSummary({
     steps: stepsToday.value,
     stepsGoal: metricDef("steps")?.goal ?? null,
@@ -723,9 +839,84 @@ const nativeSummary = computed(() => {
     nextHabit: routineStatus(habitsStore, todayKey.value).next?.name ?? null,
     syncedAt: helio.lastSyncAt,
     strapBattery: helio.battery,
+    // Whatever three rings are on screen, so the widget shows the same three
+    // and choosing here changes both.
+    dials: dials.value,
+    steps48: bucketSeries(stepSamples.value, {
+      from: new Date(`${todayKey.value}T00:00:00`).getTime(),
+      agg: "sum",
+      cumulative: true,
+    }),
+    hr48: hrBuckets.value,
+    hrNow: hrSamples.value.at(-1)?.v ?? null,
+    // **The same three figures HeartPage prints, computed the same way.**
+    //
+    // These were briefly derived from the half-hourly buckets, to stop a single
+    // bad reading setting the MAX - the wrong cure, because that reading was
+    // never in the archive at all: it came from the background service, which
+    // fetches a wider window than the app has ingested. With the service no
+    // longer restating buckets the app owns, the raw day is safe again, and raw
+    // is what the page shows.
+    //
+    // Resting was worse: it took the archive's `restingHr` rollup, which since
+    // 2026-08-14 is scoped to the NIGHT, while HeartPage takes the tenth
+    // percentile of the DAY. Two different quantities, so the widget and the
+    // page it mirrors could never agree. Reported as exactly that.
+    hrLow: hrSamples.value.length ? Math.min(...hrSamples.value.map((s) => s.v)) : null,
+    hrHigh: hrSamples.value.length ? Math.max(...hrSamples.value.map((s) => s.v)) : null,
+    // **The night-scoped figure, which is now what every screen shows.** The
+    // widget briefly took the day percentile to match HeartPage; the page moved
+    // to the rollup instead (2026-08-19, user's call: the overnight one is the
+    // truth), so this follows it back. One definition, three surfaces.
+    restingHr: todayValues.value.restingHr ?? null,
+    // Last night in the depth a tall widget can draw: the stage totals, the
+    // score beside the hours, and the week behind it. The stages are the stored
+    // record itself, so the reconciling of `wake` and `awake` happens in one
+    // place rather than in a fourth.
+    sleepStages: entry.value.sleepStages ?? null,
+    sleepScore: sleepScore.value,
+    trend7: sleepTrend7.value,
+    profileAge: profile.age ?? null,
+    session: running
+      ? { startMillis: running.startMillis, typeName: sessionsStore.typeById(running.typeId)?.name ?? null }
+      : null,
   });
 });
 watch(nativeSummary, (value) => publishSummary(value), { immediate: true, deep: true });
+
+/**
+ * **The app's figures are the truth, and it restates them whenever it is
+ * looking.**
+ *
+ * The watcher above fires when Atlas's own numbers change - which is not the
+ * same as when the *published* summary is wrong. The background service edits
+ * that summary between app runs: it carries the newest heart rate forward, adds
+ * steps, and fills the hours of chart the app has not seen. Those are honest
+ * while the app is closed and stale the moment it opens.
+ *
+ * Without this, an app that reopens and computes exactly what it computed last
+ * time publishes nothing, and the service's version stays on the home screen for
+ * good. Republishing on every foreground makes the rule simple and total: **what
+ * the app says, the widget says**, and anything the service added survives only
+ * until Atlas is next opened to disagree with it.
+ *
+ * On `visibilitychange` rather than a tab hook, because Home is inside KeepAlive
+ * and this has to happen whichever tab the app is resumed on.
+ */
+function republishForNative() {
+  if (document.visibilityState !== "visible") return;
+  publishSummary(nativeSummary.value);
+}
+onMounted(() => {
+  document.addEventListener("visibilitychange", republishForNative);
+});
+onUnmounted(() => {
+  document.removeEventListener("visibilitychange", republishForNative);
+});
+onActivated(republishForNative);
+// A sync landing while the app is open republishes too: the service may have
+// drained and edited the summary moments before the app's own numbers settled.
+watch(() => helio.lastSyncAt, republishForNative);
 const openMetric = ref(null);
 
 /**
@@ -755,6 +946,7 @@ function onQuickLogHistory(key) {
   if (def) openMetric.value = def;
 }
 
+
 // Sentence case, not the shouted mono the zone constants carry: this sits in
 // the value column beside "7h 30m", which is a reading and not a label.
 const stressZoneLabel = (value) => {
@@ -766,6 +958,25 @@ const stressZoneLabel = (value) => {
 // from the day window because that holds one rolled-up figure per day and this
 // row wants the shape underneath it.
 const stressSamples = ref([]);
+
+/**
+ * **The word says where stress is NOW, not where the day averaged out.**
+ *
+ * It used to read `row.value`, which is the day's mean, while StressPage's hero
+ * reads the latest sample. At 10:22 on 2026-08-19 that meant Home said "Calm"
+ * and the page said 53, MILD, about the same metric at the same moment: the day
+ * mean was still mostly the night. Reported as exactly that confusion.
+ *
+ * The mean is the wrong quantity here for the same reason the day-mean heart
+ * rate no longer takes a row: an average that is three quarters sleep says
+ * nothing about now. And stress is on this card every single day precisely
+ * because it is the one vital that moves hour to hour, so "now" is the whole
+ * point of the row.
+ *
+ * The mark beside it is unaffected and still draws the day, which is the pairing
+ * this row wants: the shape of the day, and where it has got to.
+ */
+const latestStress = computed(() => stressSamples.value.at(-1)?.v ?? null);
 async function loadStress() {
   const start = new Date(`${today()}T00:00:00`).getTime();
   try {
@@ -848,6 +1059,15 @@ const syncNote = computed(() => {
   // the error still on the store is by definition from a previous one, which is
   // the same ordering `DevicePanel`'s status label already uses.
   if (helio.syncing) return { text: helio.syncPhase || "SYNCING" };
+  // **Draining counts as busy, and this is the line that was lying.** Opening the
+  // app within five minutes of a background sync declines the BLE sync but still
+  // reads the native cache, and the ingest is the part that moves the numbers. So
+  // Recovery changed under the reader while this said SYNCED 09:17 and had never
+  // said anything else. Reported as exactly that: "it updates even though the
+  // sync says it was done recently."
+  // Carries the phase when there is one, so the count the drain now publishes
+  // reaches the screen instead of a motionless word.
+  if (helio.draining) return { text: helio.syncPhase || "UPDATING" };
   if (!helio.connected) return { text: "STRAP NOT CONNECTED", warn: true };
   if (helio.lastSyncError) return { text: "SYNC FAILING", warn: true };
   if (recovery.value.state === "calibrating") return { text: "LEARNING YOUR BASELINE" };
@@ -1029,6 +1249,28 @@ onUnmounted(() => rafId && cancelAnimationFrame(rafId));
 </script>
 
 <style scoped>
+
+/* Fills the mark column so the log target is the whole of it, not the 12px
+   glyph. Transparent and borderless: it must read as the mark it wraps, since
+   the row already looks tappable and a second button outline would say there
+   are two controls before you know there are. */
+.creatinetap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: var(--row-h);
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.creatinetap:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 .home {
   /* Each tab is its own scroll container, because `body` is `overflow: hidden`.
      Home used to size itself with min-height instead, so anything past the fold
@@ -1067,11 +1309,31 @@ onUnmounted(() => rafId && cancelAnimationFrame(rafId));
 }
 /* Type comes from .wordmark in style.css, shared with every other screen. What
    stays here is the fixed height, which is layout, and load-bearing: the
-   typed-out wordmark changes width character by character during boot. */
-.logo {
-  display: flex;
-  align-items: center;
-  height: 24px;
+   typed-out wordmark changes width character by character during boot, and the
+   peak is absent for the first tick, so without a height the row collapses and
+   springs back mid-sequence.
+
+   **It must not restate display or align-items, and it used to.** `display:flex`
+   plus `align-items:center` overrode the shared rule's `inline-flex` on the
+   BASELINE, so on Home alone the peak was centred against the text rather than
+   sitting on the baseline as a capital would. Measured against the other three
+   tabs: the mark sat 1px lower with a 4.5px gap under it instead of 2px, in a
+   box 24px tall instead of 21px, which also pushed everything below it up by
+   the difference. Reported as "the A is not the same height on Home".
+
+   **And it must not pin a pixel height either**, which the first attempt at this
+   did. `.wordmark` is `inline-flex`, so its height comes from its items and not
+   from `line-height`, and the two engines disagree about what that is: Chromium
+   makes it 21px and the Android WebView 18.5px for the same declaration. A
+   hardcoded 21 therefore fixed the alignment in the browser and broke it on the
+   phone. The strut in the markup holds the row open instead, measured in the
+   same font by whichever engine is running. */
+.strut {
+  /* Zero width so it reserves height without ever shifting the mark sideways,
+     and hidden rather than transparent so it is never read aloud or selected. */
+  width: 0;
+  overflow: hidden;
+  visibility: hidden;
 }
 .cursor {
   display: inline-block;
@@ -1086,12 +1348,28 @@ onUnmounted(() => rafId && cancelAnimationFrame(rafId));
     opacity: 0;
   }
 }
+/* **These three numbers reproduce AppHeader's column, and that is the whole
+   job.** That header is `flex-direction: column` with a 5px gap, so its line
+   sits 5px under the wordmark and whatever follows sits 5px under the line.
+   Home builds the same stack out of siblings instead, and had a 14px minimum
+   against the shared line's real 16px and no gap at all below it - which put
+   the running-session row 5px higher on Home than on the other three tabs.
+   Since that row is one component mounted on all four, the difference read as
+   the row moving rather than as the header being short. */
 .hd-sub {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-top: 5px;
-  min-height: 14px;
+  /* **No min-height, and that is the point.** It carried one so the row would
+     not collapse while empty, which it never is: there is always a `.sys` child,
+     the boot line during boot and the date after it. What the minimum actually
+     did was fight the natural line height, and any number written here is a
+     number measured on one engine - 14px was Chromium's, then 16px was
+     Chromium's again, while the Android WebView lays the same line out at 14.1.
+     Left alone it is whatever the device says, which is the only way it can
+     match AppHeader's line, which has no minimum either. */
+  margin-bottom: 5px;
 }
 
 /* The wait, drawn under the wordmark while the boot is parked at the gate.

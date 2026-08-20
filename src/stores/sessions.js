@@ -25,6 +25,16 @@ import { uid } from "@/utils/date";
 
 const TYPES_KEY = "atlas_session_types";
 const SESSIONS_KEY = "atlas_sessions";
+/**
+ * The session running right now, if there is one: `{ startMillis, typeId }`.
+ *
+ * **Stored rather than held in memory, from the first tap.** A session is
+ * forty-five minutes during which the app is backgrounded and can be killed for
+ * memory at any point, so anything in a plain ref is a session lost with no way
+ * to recover the start time. One record, replaced or cleared, never appended to:
+ * there is either a session running or there is not.
+ */
+const RUNNING_KEY = "atlas_session_running";
 
 /**
  * Offered in the picker, and **deliberately not written to the store until one
@@ -65,9 +75,118 @@ export const SUGGESTED_TYPES = [
 export const useSessionsStore = defineStore("sessions", () => {
   const types = ref(load(TYPES_KEY, []));
   const sessions = ref(load(SESSIONS_KEY, []));
+  const running = ref(load(RUNNING_KEY, null));
 
   const saveTypes = () => persist(TYPES_KEY, types.value);
   const saveSessions = () => persist(SESSIONS_KEY, sessions.value);
+  const saveRunning = () => persist(RUNNING_KEY, running.value);
+
+  /**
+   * Start timing a session now.
+   *
+   * **The type is taken at START and is not required.** Tapping a type is what
+   * starts a session, so in practice there always is one; the untyped case is
+   * the way in for something not in the library yet, and it costs only the MET
+   * fallback, which is the weaker of the two calorie estimators anyway.
+   *
+   * Starting while one is already running is refused rather than silently
+   * replacing it: the running record holds the only copy of a start time nobody
+   * can reconstruct, and overwriting it would throw away a session in progress.
+   */
+  function startSession(typeId = null) {
+    if (running.value) return null;
+    running.value = { startMillis: Date.now(), typeId: typeId ?? null };
+    saveRunning();
+    return running.value;
+  }
+
+  /** Change the type of the session in progress, from the running sheet. */
+  function setRunningType(typeId) {
+    if (!running.value) return;
+    running.value = { ...running.value, typeId: typeId ?? null };
+    saveRunning();
+  }
+
+  /**
+   * Finish the running session and write it through `addManualSession`.
+   *
+   * **Everything downstream then treats it as any other manual session**, which
+   * is the whole reason it goes through that function rather than storing a
+   * third shape: types, notes, duration corrections, merging, splitting and
+   * tombstones all join on `startMillis` and all work unchanged.
+   *
+   * A session shorter than a minute is discarded rather than stored. `addManual`
+   * rounds the start to the minute and refuses a non-positive duration, so a
+   * mistaken double tap would otherwise become a zero-length row that says a
+   * thing happened for no time at all.
+   */
+  function stopSession() {
+    const current = running.value;
+    if (!current) return null;
+    const activeSeconds = Math.round((Date.now() - current.startMillis) / 1000);
+    running.value = null;
+    saveRunning();
+    if (activeSeconds < 60) return null;
+    const startMillis = addManualSession({
+      startMillis: current.startMillis,
+      activeSeconds,
+      typeId: current.typeId,
+    });
+    return startMillis == null ? null : { startMillis, activeSeconds };
+  }
+
+  /** Abandon the running session without recording anything. */
+  function cancelSession() {
+    running.value = null;
+    saveRunning();
+  }
+
+  /**
+   * Freeze what the archive says about a manual session's window.
+   *
+   * **Derive on demand, freeze only when settled**, which is the rule
+   * `sampleIngest` already applies to a night. At the moment STOP is pressed the
+   * band has not handed the window over, and it may still be short of the last
+   * few minutes on the sync after that. So a caller recomputes on each sync until
+   * a sync has completed *after* the window closed, and only then does this stop
+   * being rewritten - `settled` is what says so.
+   *
+   * Nothing is stored when the window has no samples: a manual session with no
+   * heart rate is the honest result of a strap that was in a drawer, and writing
+   * an empty `measured` would stop the next sync from trying again.
+   */
+  function setMeasured(startMillis, measured, { settled = false } = {}) {
+    if (!measured || measured.hrAvg == null) return;
+    const existing = annotationFor(startMillis);
+    // Once frozen it is never rewritten: the samples behind it get downsampled
+    // at 90 days, so a later recompute would quietly produce a worse answer.
+    if (existing?.measuredFinal) return;
+    upsert(startMillis, {
+      measured: { ...measured },
+      measuredFinal: settled === true,
+    });
+  }
+
+  /**
+   * Which of an overlapping pair to keep, recorded against the manual session.
+   *
+   * **Stored on the manual side because that is the stable key.** The band
+   * overwrites its workouts wholesale on every sync, so a choice filed against a
+   * band record would be lost the first time the band revised it; the manual
+   * session is Atlas's own and does not move.
+   *
+   * `"band"` or `"manual"`. Absent means never asked, which reads as the band's,
+   * and once set it is permanent rather than re-derived on every read: a rule
+   * that changed its mind because a later sync nudged a boundary would be worse
+   * than either answer.
+   */
+  function setOverlapChoice(manualStartMillis, choice) {
+    upsert(manualStartMillis, { overlapChoice: choice === "manual" ? "manual" : "band" });
+  }
+
+  function overlapChoiceFor(manualStartMillis) {
+    return annotationFor(manualStartMillis)?.overlapChoice ?? null;
+  }
 
   /** Pickable types. Archived ones stay readable but stop being offered. */
   const activeTypes = computed(() =>
@@ -179,10 +298,25 @@ export const useSessionsStore = defineStore("sessions", () => {
         source: "manual",
         // Absent rather than zero: the band measures these and a manual entry
         // does not, and a zero would be drawn as a reading of zero.
-        caloriesKcal: null,
-        hrAvg: null,
-        hrMax: null,
-        hrMin: null,
+        //
+        // **Except where the strap was on the wrist the whole time**, in which
+        // case the archive holds the samples for this window and they are
+        // measured rather than typed - which is the distinction
+        // `ManualSessionSheet` refuses to ask for a heart rate over, not a
+        // blanket rule that a manual session can never have one. `measured` is
+        // computed once by `deriveMeasured` and snapshotted, exactly as
+        // `splitStats` is, because every reader of a session list is synchronous
+        // and samples past 90 days get downsampled.
+        caloriesKcal: s.measured?.kcal ?? null,
+        hrAvg: s.measured?.hrAvg ?? null,
+        hrMax: s.measured?.hrMax ?? null,
+        hrMin: s.measured?.hrMin ?? null,
+        // What the figures above are, so a row can mark them. A derived kcal is
+        // not a measured one and must never print without saying so.
+        hrRecomputed: s.measured?.hrAvg != null,
+        hrSampleCount: s.measured?.samples ?? 0,
+        caloriesEstimated: s.measured?.kcal != null,
+        caloriesProvisional: s.measured?.kcalProvisional ?? false,
         distanceMeters: null,
         altitudeAvgMeters: null,
       }))
@@ -482,6 +616,14 @@ export const useSessionsStore = defineStore("sessions", () => {
     annotationFor,
     addManualSession,
     manualSessions,
+    running,
+    startSession,
+    setRunningType,
+    stopSession,
+    cancelSession,
+    setMeasured,
+    setOverlapChoice,
+    overlapChoiceFor,
     setType,
     setNote,
     setDuration,

@@ -11,6 +11,7 @@
 
 import { mergeWorkouts } from "@/components/activity/mergeSessions";
 import { applySplits } from "@/components/activity/splitSessions";
+import { findOverlaps, suppressedStarts } from "@/components/activity/sessionOverlap";
 
 /**
  * `store` is the sessions store, passed rather than imported so this stays a
@@ -26,10 +27,25 @@ export function resolveSessions(rawSessions, store) {
   // into a band record would drop it from the merge *and* from the list, since
   // a member is skipped on its own account.
   const byStart = new Map([...raw, ...manual].map((s) => [s.startMillis, s]));
+
+  // **One walk must not be two rows, and this is the only place that can say so.**
+  // Atlas can start a session itself and the band may separately decide the same
+  // window was a workout; the two never agree on their boundaries, so they are
+  // paired by span overlap rather than by `startMillis`. The band's record wins
+  // unless the user has said otherwise, and the loser is dropped here rather than
+  // per screen - every list, the week chart, the month totals and Recovery's day
+  // markers all read through this function, which is why it was extracted, so
+  // suppressing once keeps every one of them counting the session exactly once.
+  const suppressed = suppressedStarts(
+    findOverlaps(manual, raw),
+    (manualStart) => store.overlapChoiceFor?.(manualStart) ?? null
+  );
+
   const out = [];
 
   for (const record of raw) {
     if (store.isHidden(record)) continue;
+    if (suppressed.has(record.startMillis)) continue;
     const annotation = store.annotationFor(record.startMillis);
     // A member of a merge is not a session of its own. It reappears inside its
     // owner rather than beside it.
@@ -58,6 +74,7 @@ export function resolveSessions(rawSessions, store) {
   // a manual session has one.
   for (const session of manual) {
     if (store.isHidden(session)) continue;
+    if (suppressed.has(session.startMillis)) continue;
     const annotation = store.annotationFor(session.startMillis);
     if (annotation?.mergedInto != null) continue;
 

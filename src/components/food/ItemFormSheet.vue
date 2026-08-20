@@ -192,6 +192,26 @@
               <span>A different product that happens to share the name.</span>
             </button>
           </div>
+          <!-- The confirm this panel never had, and without which a scan of
+               something already in the library was a dead end: USE FROM NOW and
+               USE AND FIX LOGGED DAYS only set the mode, and the button that
+               commits it sits in the v-else this panel switches off. Nothing
+               else was missing - save() has always read duplicateMode, down to
+               calling refreshSnapshotsForItem on a backdate - so the feature was
+               complete and simply unreachable. KEEP WHAT I HAD and ADD AS NEW
+               were the only ways out, which is why it read as "no confirmation
+               option". Same scanrow/save pattern the delete confirmation below
+               uses, rather than a new one. -->
+          <div class="scanrow">
+            <button
+              class="save mono"
+              type="button"
+              :disabled="!form.name || !form.baseAmount || form.baseAmount <= 0"
+              @click="save"
+            >
+              {{ duplicateSaveLabel }}
+            </button>
+          </div>
         </div>
         <template v-else>
           <div v-if="scanNote" class="scannote dim-text mono">
@@ -273,6 +293,7 @@ import BarcodeScanSheet from "./BarcodeScanSheet.vue";
 import MealPickSheet from "./MealPickSheet.vue";
 import { useBackClose } from "@/composables/useBackClose";
 import { formatAmount } from "./rowDetail";
+import { parseServingSize, baseUnitForScan } from "@/utils/servingSize";
 
 const props = defineProps({
   // absent/null = creating a new item; set = editing this existing item
@@ -340,6 +361,19 @@ const duplicateMode = ref("forward");
 const duplicateUses = computed(() =>
   duplicateChoice.value ? food.countUsesOfItem(duplicateChoice.value.existing.id) : 0
 );
+
+/**
+ * What the confirm says it is about to do.
+ *
+ * The two modes differ in the one way that matters - whether days already logged
+ * get rewritten - so the button names it rather than saying SAVE twice. It stays
+ * SAVE when a backdate would touch nothing, because "AND FIX 0 DAYS" describes a
+ * rewrite that is not going to happen.
+ */
+const duplicateSaveLabel = computed(() => {
+  if (duplicateMode.value !== "backdate" || !duplicateUses.value) return "SAVE";
+  return `SAVE AND FIX ${duplicateUses.value} ${duplicateUses.value === 1 ? "DAY" : "DAYS"}`;
+});
 
 /** Put back what was there before the scan overwrote the fields. */
 function keepPrevious() {
@@ -446,10 +480,21 @@ function applyScannedAsNew(item) {
   form.fat = item.fat;
   form.fibre = item.fibre;
   form.barcode = item.barcode;
-  // "1 serving" on its own doesn't say what that actually is - when OFF
-  // provides a concrete description ("2 pieces (70g)"), use that as the
-  // unit instead of the generic placeholder.
-  if (item.servingSize) form.baseUnit = item.servingSize;
+  // **The serving description goes to `portion`, never to `baseUnit`.** It used
+  // to be assigned straight to the unit, and `serving_size` is free text a
+  // stranger typed, so a real library collected 23 distinct "units" - `1 portion
+  // (13 g)`, `11 chips (27 g)`, `60.0g`, `375ml`. `baseUnit` is the noun a
+  // quantity counts; `portion` is what one of them actually is, which is exactly
+  // what this string describes and what prints `1.5 SERVING (45 G)`.
+  //
+  // Unparseable descriptions are dropped rather than kept as prose: a portion
+  // multiplies every macro shown for the item, so a wrong one is worse than none.
+  form.baseUnit = baseUnitForScan(item.servingBasis);
+  const portion = parseServingSize(item.servingSize);
+  if (portion) {
+    form.portionAmount = portion.amount;
+    form.portionUnit = portion.unit;
+  }
   scanHint.value =
     item.servingBasis === "100g"
       ? "PER 100G, CHECK QUANTITY BEFORE SAVING"

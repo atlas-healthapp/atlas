@@ -232,3 +232,95 @@ describe("lifeBand", () => {
     expect(lifeBand(2).token).toBe("--rec-low");
   });
 });
+
+describe("pooling the evidence", () => {
+  const run = (startT, hours, from, to) => [
+    { t: startT, v: from },
+    { t: startT + hours * 60 * 60 * 1000, v: to },
+  ];
+
+  it("weights a long discharge above a short one", () => {
+    // A 70% run over 14 days says 20 days. A 16% run over 1 day says 6.25. The
+    // mean of those two ratios is 13.1, which splits the difference between a
+    // fortnight of evidence and an afternoon of it. Pooled, the long run
+    // dominates as it should.
+    const t0 = Date.parse("2026-07-01T00:00:00Z");
+    const DAY = 24 * 60 * 60 * 1000;
+    const readings = [
+      ...run(t0, 14 * 24, 95, 25),
+      ...run(t0 + 15 * DAY, 24, 95, 79),
+      // A segment only counts once a charge has closed it, so the second run
+      // needs one after it too.
+      { t: t0 + 17 * DAY, v: 96 },
+    ];
+    const life = batteryLife(readings);
+    expect(life.state).toBe("ready");
+    expect(life.days).toBeGreaterThan(15);
+    expect(life.days).toBeLessThan(20);
+  });
+
+  it("says how much discharge it is built on", () => {
+    const t0 = Date.parse("2026-07-01T00:00:00Z");
+    const DAY2 = 24 * 60 * 60 * 1000;
+    const readings = [
+      ...run(t0, 10 * 24, 90, 30),
+      ...run(t0 + 12 * DAY2, 5 * 24, 90, 50),
+      { t: t0 + 19 * DAY2, v: 95 },
+    ];
+    // 60 + 40 points of real discharge behind the figure.
+    expect(batteryLife(readings).basisDrop).toBe(100);
+  });
+});
+
+// Added 2026-08-20, from the real device series. One charge from 20% to 99% was
+// synced eight times on the way up, and each rise started a new segment: eleven
+// "charges" for one, with near-zero discharges wedged between them feeding the
+// average as though they were real runs.
+describe("one charge is one charge, however often it was synced", () => {
+  const H = 60 * 60 * 1000;
+  const t0 = Date.UTC(2026, 7, 19, 10, 0);
+
+  // The actual shape off the phone: a discharge, then a charge climbing in eight
+  // steps over ninety minutes, including a plateau at 97 before the last rise.
+  const series = [
+    { t: t0 - 40 * H, v: 66 },
+    { t: t0 - 20 * H, v: 45 },
+    { t: t0, v: 20 },
+    { t: t0 + 0.2 * H, v: 36 },
+    { t: t0 + 0.4 * H, v: 50 },
+    { t: t0 + 0.5 * H, v: 56 },
+    { t: t0 + 1.0 * H, v: 92 },
+    { t: t0 + 1.1 * H, v: 93 },
+    { t: t0 + 1.2 * H, v: 95 },
+    { t: t0 + 1.3 * H, v: 97 },
+    { t: t0 + 1.4 * H, v: 97 },
+    { t: t0 + 1.5 * H, v: 99 },
+    { t: t0 + 20 * H, v: 88 },
+  ];
+
+  it("cuts it into two runs, not nine", () => {
+    const segs = dischargeSegments(series);
+    expect(segs).toHaveLength(2);
+  });
+
+  it("never reports a discharge that went up", () => {
+    // The first attempt stopped the climb at the plateau, so the run started at
+    // 97 and rose to 99 inside itself: a segment with a drop of minus two.
+    for (const s of dischargeSegments(series)) {
+      expect(s.drop).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("starts the new run at the top of the charge", () => {
+    const [, after] = dischargeSegments(series);
+    expect(after.fromPct).toBe(99);
+    expect(after.toPct).toBe(88);
+  });
+
+  it("leaves the discharge before the charge intact", () => {
+    const [before] = dischargeSegments(series);
+    expect(before.fromPct).toBe(66);
+    expect(before.toPct).toBe(20);
+    expect(before.drop).toBe(46);
+  });
+});

@@ -87,11 +87,16 @@
         <!-- Promoted out of the grey run-on under the verdict, where the one
              actionable sentence on the page was the third thing in a stack of
              asides and read as a footnote. -->
+        <!-- Both this and WHAT WENT INTO IT fold, matching the sleep page. They
+             are the workings behind a score stated above them, so they are
+             reference rather than news - and each header keeps enough to answer
+             its own question while closed. -->
         <HomeCard
           v-if="headroomParas.length"
           :title="improveLabel"
           :color="famRecovery"
           :ink-color="famRecoveryInk"
+          collapsible
         >
           <!-- The gap, then a paragraph per term in order of how much of the
                score it carries. Every term with points missing gets one, whether
@@ -112,6 +117,7 @@
             :meta="result.state === 'ready' ? `${result.score} / 100` : ''"
             :color="famRecovery"
             :ink-color="famRecoveryInk"
+            collapsible
           >
             <div class="terms">
             <div v-for="r in rows" :key="r.key" class="term">

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A sample night's composition, for the widget picker alone.
+
+     The picker renders previewLayout exactly as written, and every field in
+     these layouts is empty until the provider fills it - so a widget with a
+     drawn chart previewed as a blank card and told nobody what they were
+     placing. Reported 2026-08-19.
+
+     Overwritten by setImageViewBitmap on the first draw, so this is never seen
+     on a placed widget. Proportions are a real night: 66 deep, 283 light, 137
+     rem, 5 awake. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="8dp"
+    android:viewportWidth="200"
+    android:viewportHeight="8">
+    <path
+        android:pathData="M4,0 L27,0 L27,8 L4,8 A4,4 0 0 1 4,0 Z"
+        android:fillColor="@color/widget_stage_deep" />
+    <path
+        android:pathData="M27,0 L142,0 L142,8 L27,8 Z"
+        android:fillColor="@color/widget_stage_light" />
+    <path
+        android:pathData="M142,0 L197,0 L197,8 L142,8 Z"
+        android:fillColor="@color/widget_stage_rem" />
+    <path
+        android:pathData="M197,0 A4,4 0 0 1 197,8 L197,0 Z"
+        android:fillColor="@color/widget_stage_awake" />
+</vector>

@@ -19,6 +19,7 @@
     title="UNITS"
     :summary="summary"
     :open="open"
+    :nested="nested"
     @toggle="$emit('toggle')"
   >
     <div v-for="dim in dims" :key="dim.key" class="drow">
@@ -43,7 +44,12 @@ import { computed } from "vue";
 import SettingsSection from "./SettingsSection.vue";
 import { useUnitsStore } from "@/stores/units";
 
-defineProps({ open: { type: Boolean, default: false } });
+// `nested` is only passed straight through: this panel lives inside the SETUP
+// group, and the group draws the card.
+defineProps({
+  open: { type: Boolean, default: false },
+  nested: { type: Boolean, default: false },
+});
 defineEmits(["toggle"]);
 
 const units = useUnitsStore();

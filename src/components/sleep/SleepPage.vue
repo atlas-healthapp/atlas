@@ -99,10 +99,15 @@
                between them, so nothing said where one ended; the card edge does
                that, and it makes this page the same system as the rest of the
                app rather than the exception. -->
+          <!-- Folded by default, on the user's call. It is the workings behind a
+               score the page has already stated twice above, so it is reference
+               rather than news - and its header keeps the score, which is the
+               part you came back for. -->
           <HomeCard
             title="WHAT WENT INTO IT"
             :meta="`${result.score ?? '--'} / 100`"
             :color="famBody"
+            collapsible
           >
             <div class="terms">
             <div v-for="t in terms" :key="t.key" class="term">
@@ -184,14 +189,19 @@
                  the thing it enlarges, and in the header it read as a page
                  action sitting next to a title. -->
             <svg class="hypno" viewBox="0 0 340 194">
+              <!-- **No row labels.** They named the four stages down the left,
+                   and the stage totals under the chart name them again with
+                   their colours - so the gutter cost 46 of 340 units to repeat
+                   what was already there, and the chart read as cramped. Depth
+                   is still carried by vertical position, deep at the bottom, and
+                   the legend below is what maps a colour to a word. -->
               <g v-for="s in ROW_LABEL_ORDER" :key="`r-${s}`">
-                <line x1="46" :y1="rowY(s)" x2="340" :y2="rowY(s)" class="grid" />
-                <text x="0" :y="rowY(s) + 16" class="rowlabel">{{ STAGE_LABEL[s] }}</text>
+                <line x1="0" :y1="rowY(s)" x2="340" :y2="rowY(s)" class="grid" />
               </g>
               <rect
                 v-for="(seg, i) in hypno.segments"
                 :key="i"
-                :x="46 + seg.x"
+                :x="seg.x"
                 :y="seg.y"
                 :width="seg.w"
                 :height="seg.h"
@@ -201,7 +211,7 @@
               <text
                 v-for="(t, i) in hypno.ticks"
                 :key="`t-${i}`"
-                :x="46 + t.x"
+                :x="t.x"
                 y="190"
                 class="tick"
                 text-anchor="middle"
@@ -247,10 +257,115 @@
           </div>
           </HomeCard>
 
+          <!-- The day's own daytime sleep, above the divider with everything
+               else about this day. **Still not a line on THE NIGHT** - that was
+               option B's reasoning on 2026-08-18 and it survives: a nap is not
+               part of the night, and borrowing that card's header would need a
+               permanent qualifier. Its own card says the same thing structurally
+               and costs no words.
+
+               Drawn only when the day had one. A card reading NONE on most days
+               is a card teaching you to skip it, which is the same rule the
+               fortnight below is drawn under. -->
+          <!-- No meta. The header carried the day's total, which on a day with
+               one nap is the same figure as the row underneath it, printed
+               twice a centimetre apart. -->
+          <HomeCard
+            v-if="napsOnDay.length"
+            :title="napsOnDay.length > 1 ? 'NAPS' : 'NAP'"
+            :color="famBody"
+          >
+            <div v-for="n in napsOnDay" :key="n.key" class="napblock">
+              <div class="naprow">
+                <span class="napdur mono">{{ n.duration }}</span>
+                <span class="napat mono">{{ n.span }}</span>
+              </div>
+              <!-- Drawn in the order it happened, not in stage order like the
+                   night's CompositionBar. That bar shows proportions because a
+                   night's row has no room for a timeline; here the band gives
+                   the real sequence and the nap is short enough to show it, so
+                   inventing an order is not the risk - throwing one away is. -->
+              <template v-if="n.stages.length">
+                <div class="napstrip">
+                  <i
+                    v-for="(s, i) in n.stages"
+                    :key="i"
+                    :style="{
+                      width: `${s.share}%`,
+                      background: `var(--stage-${s.stage})`,
+                    }"
+                  ></i>
+                </div>
+                <div class="napstages mono">
+                  <span v-for="t in n.stageTotals" :key="t.stage">
+                    {{ STAGE_LABEL[t.stage] }} {{ t.minutes }}M
+                  </span>
+                </div>
+              </template>
+            </div>
+            <div class="napnote mono">NOT COUNTED IN THE SCORE ABOVE.</div>
+          </HomeCard>
+
           <div class="grouphd mono" :style="{ color: famBody }">HISTORY</div>
 
+          <!-- The score's own history, first under the divider (2026-08-18).
+               The page opens on a number out of 100 and then never mentioned it
+               again down here: four charts about the parts and none about what
+               they add up to. RecoveryPage has had the mirror image of this card
+               since it was built and it is the most used thing on it.
+
+               Bars coloured by band, tap to step the page, exactly as that one
+               does - a run of colour answers "how many good nights have I had"
+               without reading a number off an axis. -->
           <HomeCard
-            title="WHEN YOU SLEPT"
+            v-if="scoreHistory.scored"
+            title="SLEEP SCORE"
+            :meta="`${scoreHistory.scored} NIGHTS · AVG ${scoreHistory.average}`"
+            :color="famBody"
+          >
+            <div class="histwrap">
+              <svg
+                class="hist"
+                viewBox="0 0 100 46"
+                preserveAspectRatio="none"
+                role="img"
+                :aria-label="`Sleep score for the last ${scoreHistory.scored} nights`"
+              >
+                <rect
+                  v-for="b in scoreHistory.bars"
+                  :key="b.date"
+                  :x="b.x"
+                  :y="b.y"
+                  :width="b.width"
+                  :height="b.height"
+                  :fill="b.color"
+                  :fill-opacity="b.date === viewDate ? 1 : 0.62"
+                />
+              </svg>
+              <!-- Over the chart rather than in it: an SVG scaled with
+                   preserveAspectRatio="none" stretches its own hit areas, so the
+                   targets are plain divs at real width. Same as RecoveryPage. -->
+              <div class="hithit">
+                <button
+                  v-for="b in scoreHistory.bars"
+                  :key="b.date"
+                  type="button"
+                  class="hit"
+                  :disabled="b.empty"
+                  :aria-label="`${b.date}${b.score == null ? ', not scored' : `, ${b.score}, ${b.label}`}`"
+                  @click="viewDate = b.date"
+                ></button>
+              </div>
+            </div>
+            <div class="histaxis mono">
+              <span>{{ axisDate(scoreHistory.from) }}</span>
+              <span>{{ scoreHistory.to === today() ? "LAST NIGHT" : axisDate(scoreHistory.to) }}</span>
+            </div>
+          </HomeCard>
+
+
+          <HomeCard
+            title="SLEEP WINDOW"
             :meta="result.sri != null ? `${result.sri}% REGULAR` : ''"
             :color="famBody"
           >
@@ -429,6 +544,90 @@
           </div>
           </HomeCard>
 
+          <!-- The fortnight, which answers a different question from the card
+               above it: not what you did today but whether this is a habit.
+               Plural against that card's singular NAP, which is the whole
+               difference between them - two cards under one identical header
+               could only read as a mistake. -->
+          <HomeCard
+            v-if="napDays.length"
+            title="NAPS"
+            :meta="`LAST ${NAP_WINDOW_DAYS} DAYS`"
+            :color="famBody"
+          >
+            <!-- When, not how much. The rows below already say how long each nap
+                 was, so a chart of durations would redraw the numbers beside it;
+                 what they cannot show is the pattern - that these cluster in the
+                 late afternoon, and that several are evening dozes. The axis is
+                 the daytime counterpart to SLEEP WINDOW's 21:00 to 13:00, two
+                 halves of one clock drawn in the same language. -->
+            <div class="napchart">
+              <div class="napy mono">
+                <span v-for="t in napGeometry.ticks" :key="t.label" :style="{ top: `${t.y}px` }">
+                  {{ t.label }}
+                </span>
+              </div>
+              <div class="napplot">
+                <span
+                  v-for="c in napGeometry.columns"
+                  :key="c.date"
+                  class="napcol"
+                  :style="{ left: `${c.x}%`, width: `${c.width}%` }"
+                >
+                  <i
+                    v-for="m in c.marks"
+                    :key="m.bedTime"
+                    :style="{ top: `${m.y}px`, height: `${m.height}px` }"
+                  ></i>
+                  <em class="napday-letter mono">{{ c.day }}</em>
+                </span>
+              </div>
+            </div>
+
+            <div v-for="d in napDays" :key="d.key" class="naprow">
+              <span class="napday mono">{{ d.label }}</span>
+              <span class="napdur mono">{{ d.duration }}</span>
+              <span class="napat mono">FROM {{ d.at }}</span>
+            </div>
+            <div class="napnote mono">NOT COUNTED IN ANY SLEEP SCORE.</div>
+          </HomeCard>
+
+          <!-- The figures behind every chart above, folded (2026-08-18). Numbers
+               you want to compare exactly are better read than plotted, and three
+               of the charts above were being scanned for their figures anyway.
+               Folded and second to last because it is reference rather than news,
+               which is the same billing HOW IT IS BUILT gets under it. -->
+          <HomeCard
+            v-if="nightRows.length"
+            title="NIGHT BY NIGHT"
+            :meta="`LAST ${nightRows.length} NIGHTS`"
+            :color="famBody"
+            collapsible
+          >
+            <div class="nbnwrap">
+              <table class="nbn mono">
+                <thead>
+                  <tr>
+                    <th>NIGHT</th>
+                    <th>HOURS</th>
+                    <th>SCORE</th>
+                    <th>BPM</th>
+                    <th>NAP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="r in nightRows" :key="r.date" :class="{ viewed: r.date === viewDate }">
+                    <td class="nbnday">{{ r.label }}</td>
+                    <td>{{ r.hours }}</td>
+                    <td :style="{ color: r.scoreColor }">{{ r.score }}</td>
+                    <td>{{ r.hr }}</td>
+                    <td class="nbnday">{{ r.nap }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </HomeCard>
+
           <!-- Collapsed, and last. Reference rather than news: read once, then in
                the way of everything above it that changes nightly. Same treatment
                as the Recovery page's HOW IT IS BUILT, because a score that asks to
@@ -571,14 +770,17 @@
           </div>
           <div class="zoombody">
           <svg class="zoomchart" viewBox="0 0 640 258" preserveAspectRatio="xMidYMid meet">
+            <!-- Same removal as the inline chart, and it matters more here: the
+                 gutter sat further in than the title and the legend, so the one
+                 thing the expanded view exists to enlarge was the narrowest
+                 element on the screen. -->
             <g v-for="s in ROW_LABEL_ORDER" :key="`z-${s}`">
-              <line x1="52" :y1="zoomRowY(s)" x2="640" :y2="zoomRowY(s)" class="grid" />
-              <text x="0" :y="zoomRowY(s) + 20" class="rowlabel">{{ STAGE_LABEL[s] }}</text>
+              <line x1="0" :y1="zoomRowY(s)" x2="640" :y2="zoomRowY(s)" class="grid" />
             </g>
             <rect
               v-for="(seg, i) in zoomHypno.segments"
               :key="i"
-              :x="52 + seg.x"
+              :x="seg.x"
               :y="seg.y"
               :width="seg.w"
               :height="seg.h"
@@ -588,7 +790,7 @@
             <text
               v-for="(t, i) in zoomHypno.ticks"
               :key="`zt-${i}`"
-              :x="52 + t.x"
+              :x="t.x"
               y="252"
               class="tick"
               text-anchor="middle"
@@ -633,6 +835,8 @@ import { hypnogramGeometry } from "@/components/sleep/hypnogram";
 import { regularityColumns } from "@/components/sleep/whenYouSlept";
 import { stackedDurationBars } from "@/components/sleep/durationHistory";
 import { rangeBars } from "@/components/sleep/nightlyBars";
+import { sleepScores, sleepScoreBars, sleepBandColor } from "@/components/sleep/scoreHistory";
+import { napColumns } from "@/components/sleep/napChart";
 import { useTripLane } from "@/composables/useTripLane";
 import TripLane from "@/components/marks/TripLane.vue";
 import {
@@ -698,6 +902,98 @@ const prevNight = computed(
 const nextNight = computed(() => recordedNights.value.find((d) => d > viewDate.value) ?? null);
 
 const entry = computed(() => checkin.entryFor(viewDate.value));
+
+/**
+ * How far back the naps section looks. Fourteen, matching SLEEP WINDOW above
+ * it, so the two history sections describe the same stretch of time.
+ */
+const NAP_WINDOW_DAYS = 14;
+
+/**
+ * Days in that window that had a daytime sleep, newest first.
+ *
+ * Reads `naps` off the entry, which is a different field from `sleep` and
+ * `sleepStages` on purpose: the score is computed from those two and can
+ * therefore never see this, whatever anybody adds later.
+ */
+const napClock = (ms) =>
+  new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+/**
+ * Minutes on their own under an hour. `fmtHoursMins` is right for a night and
+ * prints "0h 45m" here, and most naps are under an hour - measured, nine of the
+ * twelve in the archive - so the leading zero would be the common case rather
+ * than the odd one. Formatted here instead of changing the shared helper, which
+ * every sleep duration in the app depends on.
+ */
+const napDuration = (minutes) =>
+  (minutes ?? 0) < 60 ? `${Math.round(minutes ?? 0)}M` : fmtHoursMins((minutes ?? 0) / 60);
+
+/** One nap, formatted the two ways this page prints them. Shared so the day's
+ *  card and the history list can never disagree about a duration. */
+function napRow(nap, dateKey) {
+  const timeline = nap.stageTimeline ?? [];
+  // Shares of the nap's own length, so a 17-minute nap and a two-hour one both
+  // fill their strip: this is what the nap was made of, not how it compares
+  // with the night above it.
+  const total = timeline.reduce((sum, r) => sum + r.minutes, 0);
+  const byStage = new Map();
+  for (const run of timeline) {
+    byStage.set(run.stage, (byStage.get(run.stage) ?? 0) + run.minutes);
+  }
+  return {
+    key: `${dateKey}-${nap.bedTime}`,
+    sort: nap.bedTime,
+    label: axisDate(dateKey).toUpperCase(),
+    duration: napDuration(nap.minutes),
+    at: napClock(nap.bedTime),
+    stages: total ? timeline.map((r) => ({ ...r, share: (r.minutes / total) * 100 })) : [],
+    // Deepest first, which is the order the night's legend reads in and the
+    // order the eye wants: a nap with deep sleep in it is the interesting one.
+    stageTotals: STAGE_ORDER.filter((s) => byStage.has(s)).map((s) => ({
+      stage: s,
+      minutes: byStage.get(s),
+    })),
+    // Both ends, for the day's own card. The history list cannot afford them:
+    // it is a fortnight of rows and the start is what makes them comparable.
+    span: nap.wakeTime
+      ? `${napClock(nap.bedTime)} → ${napClock(nap.wakeTime)}`
+      : napClock(nap.bedTime),
+  };
+}
+
+/**
+ * The naps of the day being viewed, earliest first.
+ *
+ * A nap sits above the HISTORY divider like everything else about this day, and
+ * in its own card rather than as a line on THE NIGHT - that was option B's
+ * reasoning on 2026-08-18 and it still holds: the night card's header says
+ * "night", and a nap borrowing it would need a permanent qualifier. What has
+ * changed is that the day it happened is now answered here as well as in the
+ * fortnight below, which is what Zepp does and what the user asked for once
+ * there were real naps on the screen to look at.
+ */
+const napsOnDay = computed(() => {
+  const entryNaps = entry.value?.naps ?? [];
+  return entryNaps
+    .filter((nap) => nap?.bedTime)
+    .map((nap) => napRow(nap, viewDate.value))
+    .sort((a, b) => a.sort - b.sort);
+});
+
+const napDays = computed(() => {
+  const from = addDays(today(), -(NAP_WINDOW_DAYS - 1));
+  const out = [];
+  for (const e of checkin.entries) {
+    if (!e.naps?.length || e.date < from || e.date > today()) continue;
+    for (const nap of e.naps) {
+      if (!nap?.bedTime) continue;
+      out.push(napRow(nap, e.date));
+    }
+  }
+  return out.sort((a, b) => b.sort - a.sort);
+});
+
 const hours = computed(() => entry.value?.sleep ?? null);
 const stages = computed(() => entry.value?.sleepStages ?? null);
 
@@ -808,7 +1104,9 @@ const scaleBands = computed(() => sleepScaleBands(result.value.label));
 
 const hypno = computed(() =>
   hypnogramGeometry(timeline.value, stages.value?.bedTime ?? null, {
-    width: 294,
+    // The whole 340-unit viewBox. It was 294 because 46 of it went to a column
+    // of stage names that the totals underneath already list.
+    width: 340,
     rowHeight: ROW_H,
   })
 );
@@ -824,13 +1122,29 @@ const zoomed = ref(false);
 const ZOOM_ROW_H = 56;
 const zoomHypno = computed(() =>
   hypnogramGeometry(timeline.value, stages.value?.bedTime ?? null, {
-    width: 588,
+    // The full viewBox now that the 52-unit label gutter is gone.
+    width: 640,
     rowHeight: ZOOM_ROW_H,
   })
 );
 function zoomRowY(stage) {
   return STAGE_ROW[stage] * ZOOM_ROW_H;
 }
+
+/**
+ * The score's own fortnight, ending on the night being viewed like the charts
+ * beside it rather than on today. Every night is scored as it stood then, which
+ * is what stops a bar changing height each time the page is opened.
+ */
+const scoreHistory = computed(() =>
+  sleepScoreBars(
+    sleepScores({
+      entries: checkin.entries,
+      entryFor: (d) => checkin.entryFor(d),
+      endKey: viewDate.value,
+    })
+  )
+);
 
 const tapped = ref(null);
 const regularity = computed(() =>
@@ -868,6 +1182,45 @@ const duration = computed(() =>
 const trip = useTripLane(
   computed(() => durationEntries.value.map((e) => ({ date: e.date, value: e.sleep })))
 );
+
+/** The naps of the same fortnight, on the same slots as HOW LONG above them:
+ *  one window, trimmed once, so no two charts here disagree about which column
+ *  is which day. */
+const NAP_CHART_H = 90;
+const napGeometry = computed(() =>
+  napColumns(
+    durationEntries.value.map((e) => ({ date: e.date, naps: e.naps ?? [] })),
+    { height: NAP_CHART_H }
+  )
+);
+
+/**
+ * Every figure the charts above draw, newest first, for the folded table.
+ *
+ * Reads the same `durationEntries` window and the same `scoreHistory` scores
+ * rather than recomputing either: a table that disagreed with the chart above
+ * it would be the worst of both.
+ */
+const nightRows = computed(() => {
+  const scoreByDate = new Map(scoreHistory.value.bars.map((b) => [b.date, b]));
+  return [...durationEntries.value]
+    .reverse()
+    .filter((e) => e.sleep != null || e.naps?.length)
+    .map((e) => {
+      const bar = scoreByDate.get(e.date);
+      const napMinutes = (e.naps ?? []).reduce((sum, n) => sum + (n?.minutes ?? 0), 0);
+      return {
+        date: e.date,
+        label: axisDate(e.date).toUpperCase(),
+        hours: e.sleep == null ? "--" : fmtHoursMins(e.sleep).toUpperCase(),
+        score: bar?.score ?? "--",
+        scoreColor: bar?.score == null ? "var(--dim)" : sleepBandColor(bar.label),
+        hr: e.sleepStages?.avgHr ?? "--",
+        // A middot rather than a zero: no nap is not a nap of no minutes.
+        nap: napMinutes ? `${napMinutes}M` : "·",
+      };
+    });
+});
 
 /** The band's own average across each night's sleep window, oldest first. */
 const sleepingHrSeries = computed(() =>
@@ -924,6 +1277,207 @@ function barWidth(stage) {
 </script>
 
 <style scoped>
+
+/* One line per nap: the day, how long, and when it started. No mark, because a
+   nap has no target and nothing to compare against - see the marks note about a
+   dot grid claiming progress toward a goal that does not exist. */
+.naprow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--panel-line);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+.naprow:first-of-type {
+  border-top: 0;
+}
+.napday {
+  width: 62px;
+  flex: none;
+  color: var(--dim);
+}
+.napdur {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.napat {
+  margin-left: auto;
+  color: var(--dim);
+}
+/* The score chart. Same treatment as RecoveryPage's, deliberately: the two
+   cards do the same job on two pages and drifting apart is how one of them ends
+   up with a different bar width for the same fortnight. */
+.histwrap {
+  position: relative;
+  padding-top: 2px;
+}
+.hist {
+  display: block;
+  width: 100%;
+  height: 62px;
+}
+/* Real-width targets over a stretched chart. preserveAspectRatio="none" scales
+   the SVG's own hit areas with it, so a rect that looks 8px wide is not. */
+.hithit {
+  position: absolute;
+  inset: 2px 0 0;
+  display: flex;
+}
+.hit {
+  flex: 1;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.hit:disabled {
+  cursor: default;
+}
+.hit:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
+}
+.histaxis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  letter-spacing: 1.2px;
+  color: var(--dim);
+  padding-top: 6px;
+}
+
+/* The nap clock. Hours down the side like WHEN YOU SLEPT, since it is the same
+   axis idea covering the other half of the day. */
+.napchart {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.napy {
+  position: relative;
+  width: 34px;
+  flex: none;
+  height: 90px;
+}
+.napy span {
+  position: absolute;
+  left: 0;
+  transform: translateY(-50%);
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--dim);
+}
+.napplot {
+  position: relative;
+  flex: 1;
+  height: 90px;
+  border-left: 1px solid var(--panel-line);
+}
+/* Room under the plot for the weekday letters, which sit below the axis rather
+   than inside it: a mark at 21:00 is already near the bottom. */
+.napchart {
+  padding-bottom: 14px;
+}
+.napday-letter {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0;
+  color: var(--dim);
+}
+.napcol {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.napcol i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--fam-body);
+  border-radius: 2px;
+}
+
+/* The folded table. Its own scroller, so five columns of tabular figures can
+   never make the page itself scroll sideways. */
+.nbnwrap {
+  overflow-x: auto;
+}
+.nbn {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums;
+}
+.nbn th {
+  text-align: right;
+  font-weight: 400;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  color: var(--dim);
+  padding-bottom: 7px;
+}
+.nbn th:first-child,
+.nbn td:first-child {
+  text-align: left;
+}
+.nbn td {
+  text-align: right;
+  color: var(--ink);
+  padding: 5px 0;
+  border-top: 1px solid var(--panel-line);
+}
+.nbn tr.viewed td {
+  background: color-mix(in srgb, var(--fam-body) 12%, transparent);
+}
+.nbnday {
+  color: var(--dim);
+}
+
+/* One nap: its row, then what it was made of. The block is what carries the
+   hairline now, or a nap with stages would draw a rule between its own strip
+   and its own times. */
+.napblock + .napblock {
+  border-top: 1px solid var(--panel-line);
+  margin-top: 10px;
+}
+.napblock .naprow {
+  border-top: 0;
+}
+.napstrip {
+  display: flex;
+  gap: 1px;
+  height: 8px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.napstrip i {
+  display: block;
+  height: 100%;
+}
+.napstages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: var(--dim);
+}
+.napnote {
+  margin-top: 10px;
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: var(--dim);
+}
 .page {
   position: fixed;
   inset: 0;
@@ -1330,9 +1884,11 @@ function barWidth(stage) {
   left: 50%;
   /* Short of the full screen on purpose: edge to edge the chart ran under the
      status icons and read as a page that had overflowed rather than one that
-     had been laid out. */
-  width: calc(100vh - 24px);
-  height: calc(100vw - 24px);
+     had been laid out. The inset is the status bar's own, not a guess, so the
+     surface grows on a phone with a smaller one and never slides under it.
+     Rotated a quarter turn, so the PAGE's top inset is this box's left. */
+  width: calc(100vh - env(safe-area-inset-top, 12px) - env(safe-area-inset-bottom, 12px));
+  height: calc(100vw - 16px);
   transform: translate(-50%, -50%) rotate(90deg);
   display: flex;
   flex-direction: column;
@@ -1486,12 +2042,6 @@ function barWidth(stage) {
   stroke: var(--dim);
   stroke-opacity: 0.16;
   stroke-width: 0.8;
-}
-.rowlabel {
-  font-size: 11px;
-  letter-spacing: 1px;
-  fill: var(--dim);
-  font-family: var(--font-mono);
 }
 .axis {
   display: flex;

@@ -4,4 +4,59 @@
     <string name="title_activity_main">Atlas</string>
     <string name="package_name">io.github.atlashealthapp.atlas</string>
     <string name="custom_url_scheme">io.github.atlashealthapp.atlas</string>
+    <string name="widget_description">Recovery, steps and sleep at a glance.</string>
+    <string name="widget_refresh">Sync now</string>
+    <string name="widget_steps_label">STEPS</string>
+    <string name="widget_syncing">SYNCING</string>
+    <string name="widget_wordmark">ΛTLAS</string>
+    <!-- The picker lists a receiver by its own label, and without one it falls
+         back to the application label - so five widgets all read "Atlas" and
+         nothing said which was which. -->
+    <string name="widget_today_name">Atlas · Today</string>
+    <string name="widget_steps_name">Atlas · Steps</string>
+    <string name="widget_heart_name">Atlas · Heart</string>
+    <string name="widget_heart_label">HEART</string>
+    <string name="widget_session_label">SESSION</string>
+    <string name="widget_session_name">Atlas · Session</string>
+    <string name="widget_session_idle">No session running</string>
+    <string name="widget_session_idle_hint">Tap to start one</string>
+    <string name="widget_session_description">A session you started in Atlas, while it runs.</string>
+    <string name="widget_today_label">TODAY</string>
+    <string name="widget_heart_description">Heart rate now, with the shape of the day.</string>
+    <string name="widget_steps_description">Steps against your goal, with the shape of the day.</string>
+    <string name="widget_sleep_name">Atlas · Sleep</string>
+    <string name="widget_sleep_label">SLEEP</string>
+    <string name="widget_sleep_description">Last night: how long, what it was made of, and the week behind it.</string>
+    <string name="widget_stage_deep">DEEP</string>
+    <string name="widget_stage_light">LIGHT</string>
+    <string name="widget_stage_rem">REM</string>
+    <string name="widget_stage_awake">AWAKE</string>
+    <string name="widget_last_seven">LAST 7 NIGHTS</string>
+
+    <!-- The heart chart's x axis. Fixed labels: the chart is always midnight to
+         midnight, so these are not readings. -->
+    <string name="widget_axis_00">00:00</string>
+    <string name="widget_axis_06">06:00</string>
+    <string name="widget_axis_12">12:00</string>
+    <string name="widget_axis_18">18:00</string>
+    <string name="widget_axis_24">24</string>
+
+    <!-- Sample readings, for the widget picker and nowhere else.
+
+         The picker renders previewLayout exactly as written and every field in
+         these layouts is empty until the provider fills it, so a card with a
+         drawn chart in it previewed as a blank rectangle. Every string here
+         sits on a view the provider either writes or hides on its first draw,
+         so none of them can reach a placed widget. -->
+    <string name="widget_sample_sleep">8h06m</string>
+    <string name="widget_sample_score">SCORE 88</string>
+    <string name="widget_sample_window">23:13 → 07:24</string>
+    <string name="widget_sample_stages">DEEP 66M · REM 137M</string>
+    <string name="widget_sample_steps">8,412</string>
+    <string name="widget_sample_steps_goal">/ 8,000</string>
+    <string name="widget_sample_hr">62</string>
+    <string name="widget_sample_hr_resting">BPM · 52 RESTING</string>
+    <string name="widget_sample_hr_range">48-142 TODAY</string>
+    <string name="widget_sample_synced">SYNCED 14:32</string>
+    <string name="widget_sample_battery">STRAP 62%</string>
 </resources>

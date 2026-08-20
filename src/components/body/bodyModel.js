@@ -30,6 +30,12 @@ export const BODY_CARDS = [
   // `hr` sits directly under `restingHr` on purpose: they are two questions
   // about the same samples, and the one you want after reading a resting rate
   // is where it sat for the rest of the day.
-  { key: "vitals", label: "VITALS", family: "body", metrics: ["sleep", "hrv", "restingHr", "hr", "respRate", "stress", "spo2", "skinTemp"] },
+  // **Stress sits directly under sleep** (2026-08-19, user's call), on both this
+  // tab and Home. It is the one vital with a row every single day, and it used
+  // to sit fifth, so on Home its position moved down the card whenever another
+  // vital flagged. Moved here as well because `homeModel.test.js` holds the two
+  // orders together: a reader who learns where to look on one screen should not
+  // have to learn again on the other.
+  { key: "vitals", label: "VITALS", family: "body", metrics: ["sleep", "stress", "hrv", "restingHr", "hr", "respRate", "spo2", "skinTemp"] },
   { key: "composition", label: "COMPOSITION", family: "body", metrics: ["weight"] },
 ];

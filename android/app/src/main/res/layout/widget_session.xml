@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A session in progress, on the home screen.
+
+     **The only widget in the set about something that is happening.** The other
+     four report a day that has already occurred; this one is live while it is on
+     screen, and empty the rest of the time. That shapes every decision here: the
+     elapsed clock leads because it is the thing that is changing, and there is a
+     whole second state for having nothing to show.
+
+     The clock is a Chronometer, which SystemUI ticks in its own process from a
+     base it is handed. Nothing wakes to keep it moving, which is the only way a
+     counting number is affordable on a surface redrawn as rarely as a widget.
+
+     Header follows the set's rule: metric where the eye starts, wordmark
+     centred by equal weighted spacers, no negative margins - those pulled a
+     touch target outside its parent on the first widget and swallowed every
+     press. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/session_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <TextView
+            android:id="@+id/session_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_session_label" />
+
+        <!-- TextView rather than Space: a plain View is not on the RemoteViews
+             whitelist, which the notification learned by being killed for it. -->
+        <TextView
+            android:id="@+id/session_gap_a"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no" />
+
+        <TextView
+            android:id="@+id/session_mark"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:letterSpacing="0.18"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_wordmark" />
+
+        <TextView
+            android:id="@+id/session_gap_b"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <!-- ── Running ─────────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:id="@+id/session_live"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingTop="6dp">
+
+        <!-- **The clock and the heart rate share a row**, rather than the rate
+             sitting on a line of its own below. At the smallest size a widget
+             keeps only its first row, and a heart rate that disappears the moment
+             the card is made small is a heart rate you cannot rely on being
+             there. Beside the clock it survives every size the card has. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:baselineAligned="false"
+            android:gravity="bottom">
+
+            <Chronometer
+                android:id="@+id/session_clock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="34sp"
+                android:includeFontPadding="false"
+                android:textColor="@color/widget_ink" />
+
+            <TextView
+                android:id="@+id/session_gap_c"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:id="@+id/session_bpm"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="20sp"
+                android:includeFontPadding="false"
+                android:gravity="end"
+                android:maxLines="1"
+                android:paddingBottom="2dp"
+                android:textColor="@color/widget_ink"
+                android:text="134 BPM" />
+        </LinearLayout>
+
+
+        <TextView
+            android:id="@+id/session_what"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:paddingTop="3dp"
+            android:textColor="@color/widget_dim"
+            android:text="Indoor Climbing · started 08:12" />
+
+        <!-- **The zone as a gauge, not a word that appears and disappears.**
+             ZONE 3 printed as text is a label that pops in and out as the reading
+             crosses a boundary, which draws the eye to the change rather than to
+             where you are. A gauge with the whole scale drawn and a caret on it
+             answers "where am I" at a glance and never changes shape - the same
+             argument RangeMark makes in the app, where a mark scaled to the thing
+             being judged cannot show anything.
+
+             Drawn as a bitmap because RemoteViews cannot draw, and a
+             ProgressBar's tint is not remotable before API 31 while Atlas
+             supports 26. Same reason every bar and gauge in this set is a
+             bitmap. -->
+        <ImageView
+            android:id="@+id/session_zonebar"
+            android:layout_width="match_parent"
+            android:layout_height="18dp"
+            android:layout_marginTop="12dp"
+            android:scaleType="fitXY"
+            android:adjustViewBounds="false"
+            android:contentDescription="@string/widget_session_label" />
+
+        <!-- **The gauge needs its ends named or it is five coloured boxes.** The
+             scale does not start at zero - it runs from half of maximum - and an
+             axis that hides that is the defect nightlyBars carries a warning
+             about. The middle cell names the zone the caret is actually in, so
+             the strip answers "where am I" in words as well as by position. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingTop="3dp"
+            android:baselineAligned="false">
+
+            <TextView
+                android:id="@+id/session_zone_lo"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:textSize="10sp"
+                android:letterSpacing="0.08"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim"
+                android:text="93" />
+
+            <TextView
+                android:id="@+id/session_zone_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="2"
+                android:fontFamily="monospace"
+                android:textSize="10sp"
+                android:letterSpacing="0.1"
+                android:textAllCaps="true"
+                android:gravity="center_horizontal"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/widget_ink"
+                android:text="Zone 3" />
+
+            <TextView
+                android:id="@+id/session_zone_hi"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:textSize="10sp"
+                android:letterSpacing="0.08"
+                android:gravity="end"
+                android:maxLines="1"
+                android:textColor="@color/widget_dim"
+                android:text="186" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- ── Nothing running ─────────────────────────────────────────────────
+         **A widget with nothing to report still has to say something.** The
+         other four always have a number; this one is empty most of the day, and
+         a blank card reads as broken rather than as idle. So it offers the thing
+         you would open the app to do. -->
+    <LinearLayout
+        android:id="@+id/session_idle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingTop="8dp">
+
+        <TextView
+            android:id="@+id/session_idle_line"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="15sp"
+            android:letterSpacing="0.06"
+            android:maxLines="2"
+            android:textColor="@color/widget_ink"
+            android:text="@string/widget_session_idle" />
+
+        <TextView
+            android:id="@+id/session_idle_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="11sp"
+            android:letterSpacing="0.12"
+            android:textAllCaps="true"
+            android:maxLines="1"
+            android:paddingTop="4dp"
+            android:textColor="@color/widget_dim"
+            android:text="@string/widget_session_idle_hint" />
+    </LinearLayout>
+
+    <!-- Exactly one child may be weighted at a time or the extra height is split
+         and half of it becomes dead space. This filler is that child. -->
+
+
+    <TextView
+        android:id="@+id/session_filler"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:importantForAccessibility="no" />
+
+
+    <LinearLayout
+        android:id="@+id/session_footer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <TextView
+            android:id="@+id/session_battery"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/session_synced"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:letterSpacing="0.1"
+            android:gravity="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_dim"
+            android:text="" />
+    </LinearLayout>
+</LinearLayout>

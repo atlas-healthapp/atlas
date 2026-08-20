@@ -145,7 +145,16 @@
       @close="rowActions = null"
       @delete="onRowDelete"
       @move="onRowMove"
+      @save-to-library="onSaveToLibrary"
     />
+
+    <!-- Says it happened, since the library is a screen away and a button that
+         appears to do nothing is a button you press twice. -->
+    <Transition name="toast">
+      <div v-if="savedToLibrary" class="savedtoast mono">
+        {{ savedToLibrary.toUpperCase() }} SAVED TO THE LIBRARY
+      </div>
+    </Transition>
 
     <MetricPage v-if="openMetric" :def="openMetric" from="FOOD" @close="openMetric = null" />
 
@@ -522,9 +531,68 @@ function onRowMove(mealType) {
   else food.setSnackMealType(props.date, row.index, mealType);
   rowActions.value = null;
 }
+
+/**
+ * Keep a quick add as a library item.
+ *
+ * **Copies, and deliberately does not join the two.** The entry keeps its own
+ * snapshot and its `mealId` stays null, so this day's record is exactly what it
+ * was: history in Atlas is a snapshot on purpose, and linking a past entry to a
+ * new item would put it back under the library's control, where a later recipe
+ * edit could rewrite a day you already lived.
+ *
+ * Kind follows the section it was eaten in, since that is the only signal there
+ * is, and it is one tap to change in the library if it guessed wrong.
+ */
+function onSaveToLibrary() {
+  const row = activeRow.value;
+  if (!row) return;
+  const entry = food.planForDate(props.date).snacks[row.index];
+  if (!entry) return;
+  food.addLibraryItem({
+    name: entry.name?.trim() || "Saved item",
+    kind: entry.mealType === "snack" ? "snack" : "meal",
+    protein: entry.protein ?? null,
+    kcal: entry.kcal ?? null,
+    carbs: entry.carbs ?? null,
+    fat: entry.fat ?? null,
+    fibre: entry.fibre ?? null,
+  });
+  rowActions.value = null;
+  savedToLibrary.value = entry.name?.trim() || "Saved item";
+  setTimeout(() => {
+    savedToLibrary.value = "";
+  }, 2600);
+}
+const savedToLibrary = ref("");
 </script>
 
 <style scoped>
+/* Above the tab bar rather than at the very bottom: the bar is 61px plus the
+   safe-area inset, and a toast under it would be half in the gesture area. */
+.savedtoast {
+  position: fixed;
+  left: 14px;
+  right: 14px;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  z-index: 600;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid color-mix(in srgb, var(--fam-intake) 40%, transparent);
+  color: var(--fam-intake);
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-align: center;
+}
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 0.2s ease;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+}
 .daynav {
   display: flex;
   align-items: center;

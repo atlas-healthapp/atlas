@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { decodeSleepSession } from "@/utils/huamiSleep";
+import { decodeSleepSession, decodeNaps } from "@/utils/huamiSleep";
 
 const CODE = { light: 4, deep: 5, awake: 7, rem: 8 };
+const SEGMENT_START = 0x56;
+const SEGMENT_BYTES = 5;
+/** The filler the band writes between one sleep and the next. Not a stage. */
+const CODE_NOT_ASLEEP = 0x80;
 const STAGE_TOTAL_OFFSET = {
   rem: 0x24a,
   light: 0x24c,
@@ -17,12 +21,49 @@ function buildRecord({
   runs = [],
   corruptFooter = false,
   extraJunk = 0,
+  naps = [],
+  napCount = null,
+  junkNaps = 0,
+  flag14 = 0,
+  dayRuns = [],
+  dayCount = null,
 } = {}) {
   const bytes = new Uint8Array(594);
   const view = new DataView(bytes.buffer);
   view.setUint32(0x04, 1785200000, true);
   view.setUint8(0x15, 54);
   view.setUint8(0x16, 75);
+
+  // The nap block: a count at 0x17, then up to ten 6-byte entries from 0x18.
+  // `flag14` is the byte at 0x14, which is 1 on every record carrying a nap and
+  // also on four that carry none - see the test that pins the count to 0x17.
+  view.setUint8(0x14, flag14);
+  naps.forEach(([start, end, minutes], i) => {
+    const at = 0x18 + i * 6;
+    view.setUint16(at, start, true);
+    view.setUint16(at + 2, end, true);
+    view.setUint16(at + 4, minutes, true);
+  });
+  for (let i = 0; i < junkNaps; i++) {
+    const at = 0x18 + (naps.length + i) * 6;
+    view.setUint16(at, 60000, true);
+    view.setUint16(at + 2, 60600, true);
+    view.setUint16(at + 4, 601, true);
+  }
+  view.setUint8(0x17, napCount ?? naps.length);
+
+  // The second timeline block: 50 slots of its own from slot 50, counted at
+  // 0x55, holding each nap's stages with 0x80 segments filling the awake gaps
+  // between one sleep and the next. `dayRuns` are written as given -
+  // [startMin, inclusive endMin, code] - because what this block is testing is
+  // whether the decoder picks the right ones out of a real mixture.
+  dayRuns.forEach(([start, end, code], i) => {
+    const at = SEGMENT_START + (50 + i) * SEGMENT_BYTES;
+    view.setUint16(at, start, true);
+    view.setUint16(at + 2, end, true);
+    view.setUint8(at + 4, code);
+  });
+  view.setUint8(0x55, dayCount ?? dayRuns.length);
 
   const totals = { rem: 0, light: 0, deep: 0, awake: 0 };
   let minute = startMin;
@@ -128,5 +169,168 @@ describe("decodeSleepSession stage timeline", () => {
 
   it("still returns null for a record too short to trust", () => {
     expect(decodeSleepSession(new Uint8Array(100))).toBeNull();
+  });
+});
+
+// Verified against 28 real records pulled off the band on 2026-08-18, twelve of
+// which carry a nap. Two of those twelve were independently displayed by Zepp
+// while this was being read, which is what settles the inclusive end minute.
+const DAY_BASE = 1785200000 - 24 * 3600;
+const atMinute = (m) => new Date((DAY_BASE + m * 60) * 1000);
+
+describe("decodeNaps", () => {
+  it("decodes the daytime sleep the band files against a night", () => {
+    // The real block from the night ending 2026-08-16: 2494 -> 2611, 118
+    // minutes. Zepp showed that nap as 17:34 to 19:32, and 2611 is 19:31, so
+    // the end minute is inclusive and the wake time is one minute past it.
+    // The night's own end minute is exclusive - the asymmetry is the band's.
+    const bytes = buildRecord({
+      runs: [["light", 300]],
+      naps: [[2494, 2611, 118]],
+      flag14: 1,
+    });
+    expect(decodeNaps(bytes)).toEqual([
+      { bedTime: atMinute(2494), wakeTime: atMinute(2612), minutes: 118, stageTimeline: null },
+    ]);
+  });
+
+  it("counts the naps at 0x17 rather than the flag at 0x14", () => {
+    // 0x14 is 1 on every record carrying a nap, which is exactly why it cannot
+    // be trusted: it is also 1 on four records whose nap block is empty.
+    const none = buildRecord({ runs: [["light", 300]], flag14: 1 });
+    expect(decodeNaps(none)).toEqual([]);
+
+    // The two naps of 2026-08-05, the one record that told the two bytes apart.
+    const two = buildRecord({
+      runs: [["light", 300]],
+      flag14: 1,
+      naps: [
+        [2209, 2231, 23],
+        [2633, 2673, 41],
+      ],
+    });
+    expect(decodeNaps(two).map((n) => n.minutes)).toEqual([23, 41]);
+  });
+
+  it("keeps the naps of a record whose night is empty", () => {
+    // Not hypothetical, and the reason naps are read off the raw blob rather
+    // than off the decoded night: a day whose only sleep was a nap arrives as a
+    // record with no night at all - zero totals, a 0 -> 65535 span - which
+    // decodeSleepSession rejects. Reading naps off the night would lose exactly
+    // the days that have nothing else on them.
+    const bytes = buildRecord({ naps: [[1325, 1378, 54]] });
+    expect(decodeSleepSession(bytes)).toBeNull();
+    expect(decodeNaps(bytes)).toEqual([
+      { bedTime: atMinute(1325), wakeTime: atMinute(1379), minutes: 54, stageTimeline: null },
+    ]);
+  });
+
+  it("ignores entries past the declared count", () => {
+    const bytes = buildRecord({
+      runs: [["light", 300]],
+      naps: [[2209, 2231, 23]],
+      junkNaps: 3,
+    });
+    expect(decodeNaps(bytes)).toHaveLength(1);
+  });
+
+  it("never reads past the ten slots into the stage segments", () => {
+    // 0x18 plus ten 6-byte entries is exactly 0x54, where the segment count
+    // begins. An over-large count must not be believed or the hypnogram
+    // decodes as naps.
+    const naps = Array.from({ length: 10 }, (_, i) => [2000 + i * 10, 2005 + i * 10, 6]);
+    const bytes = buildRecord({ runs: [["light", 300]], naps, napCount: 255 });
+    expect(decodeNaps(bytes)).toHaveLength(10);
+  });
+
+  it("drops an entry that ends before it starts", () => {
+    const bytes = buildRecord({ runs: [["light", 300]], naps: [[2231, 2209, 23]] });
+    expect(decodeNaps(bytes)).toEqual([]);
+  });
+
+  it("returns nothing for a record too short to trust", () => {
+    expect(decodeNaps(new Uint8Array(100))).toEqual([]);
+  });
+
+  describe("stages", () => {
+    // The real 2026-08-16 nap, whose five segments sum to the 118 minutes the
+    // band declares for it: 12 + 41 + 12 + 30 + 23. The gap segment before it
+    // runs from the night's end to the nap's start and is code 0x80.
+    const REAL = {
+      runs: [["light", 300]],
+      naps: [[2494, 2611, 118]],
+      flag14: 1,
+      dayRuns: [
+        [2055, 2493, CODE_NOT_ASLEEP],
+        [2494, 2505, CODE.light],
+        [2506, 2546, CODE.deep],
+        [2547, 2558, CODE.light],
+        [2559, 2588, CODE.rem],
+        [2589, 2611, CODE.light],
+      ],
+    };
+
+    it("attaches the nap's own stages, timed from the nap's start", () => {
+      expect(decodeNaps(buildRecord(REAL))[0].stageTimeline).toEqual([
+        { stage: "light", startMinute: 0, minutes: 12 },
+        { stage: "deep", startMinute: 12, minutes: 41 },
+        { stage: "light", startMinute: 53, minutes: 12 },
+        { stage: "rem", startMinute: 65, minutes: 30 },
+        { stage: "light", startMinute: 95, minutes: 23 },
+      ]);
+    });
+
+    it("leaves out the gap filler, which is not a stage", () => {
+      // 0x80 spans the hours between one sleep and the next. Mapping it to a
+      // stage would draw being awake and about as sleep.
+      const stages = decodeNaps(buildRecord(REAL))[0].stageTimeline;
+      expect(stages.reduce((sum, s) => sum + s.minutes, 0)).toBe(118);
+    });
+
+    it("gives each nap only its own stages", () => {
+      const stages = decodeNaps(
+        buildRecord({
+          runs: [["light", 300]],
+          naps: [
+            [2329, 2351, 23],
+            [2753, 2793, 41],
+          ],
+          dayRuns: [
+            [1954, 2328, CODE_NOT_ASLEEP],
+            [2329, 2351, CODE.light],
+            [2352, 2752, CODE_NOT_ASLEEP],
+            [2753, 2793, CODE.light],
+          ],
+        })
+      ).map((n) => n.stageTimeline);
+      expect(stages[0]).toEqual([{ stage: "light", startMinute: 0, minutes: 23 }]);
+      expect(stages[1]).toEqual([{ stage: "light", startMinute: 0, minutes: 41 }]);
+    });
+
+    it("never reads the night's own segments as a nap's", () => {
+      // The two blocks share one array: the night counts from slot 0 and this
+      // one from slot 50. A nap that happened to overlap the night's minutes
+      // must still take its stages from its own block.
+      const bytes = buildRecord({
+        runs: [["deep", 300]],
+        naps: [[1382, 1400, 19]],
+        dayRuns: [[1382, 1400, CODE.light]],
+      });
+      expect(decodeNaps(bytes)[0].stageTimeline).toEqual([
+        { stage: "light", startMinute: 0, minutes: 19 },
+      ]);
+    });
+
+    it("leaves the stages off when the band sent none", () => {
+      const bytes = buildRecord({ runs: [["light", 300]], naps: [[2494, 2611, 118]] });
+      expect(decodeNaps(bytes)[0].stageTimeline).toBeNull();
+    });
+
+    it("stops at the declared count rather than reading the whole block", () => {
+      const bytes = buildRecord({ ...REAL, dayCount: 2 });
+      expect(decodeNaps(bytes)[0].stageTimeline).toEqual([
+        { stage: "light", startMinute: 0, minutes: 12 },
+      ]);
+    });
   });
 });

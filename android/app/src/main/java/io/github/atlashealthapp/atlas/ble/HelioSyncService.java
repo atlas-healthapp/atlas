@@ -55,9 +55,33 @@ public class HelioSyncService extends Service {
     private static final String CHANNEL_STATUS_LEGACY = "helio_status";
     private static final String CHANNEL_BATTERY = "helio_battery";
     private static final String CHANNEL_SESSION = "helio_session";
+    /**
+     * The channel a session IN PROGRESS is posted on, and it exists for one
+     * reason: the lock screen.
+     *
+     * <p>{@code CHANNEL_STATUS} is {@code IMPORTANCE_LOW}, and this file's own
+     * note on it already records what that costs: LOW keeps a notification off
+     * the lock screen. That is right for the day's figures, which are a thing you
+     * go and look at. It is wrong for a running session, which is the one thing
+     * here you want to see <i>without</i> unlocking, and it is what "there is no
+     * notification on my lock screen" turned out to be.
+     *
+     * <p><b>DEFAULT, but silent and alert-once.</b> Raising importance normally
+     * buys a sound and a heads-up peek, which on a notification re-posted after
+     * every sync would beep at you every half hour for the whole session. So the
+     * channel is created with no sound and no vibration, and the notification
+     * carries {@code setOnlyAlertOnce}. What is bought is lock-screen presence
+     * and nothing else.
+     *
+     * <p>A separate id from {@code CHANNEL_SESSION}, which announces a workout
+     * the band has finished and legitimately does make a sound. Two different
+     * events, two channels, so either can be silenced without the other.
+     */
+    private static final String CHANNEL_SESSION_LIVE = "helio_session_live";
     private static final int NOTIFICATION_ID = 4711;
     private static final int NOTIFICATION_ID_BATTERY = 4712;
     private static final int NOTIFICATION_ID_SESSION = 4713;
+    private static final int NOTIFICATION_ID_SESSION_LIVE = 4714;
 
     /**
      * Alert below this, clear above the higher one. The gap is deliberate: a
@@ -73,11 +97,70 @@ public class HelioSyncService extends Service {
     /** Each run only needs the gap since the last one, plus slack for a missed run. */
     private static final int SYNC_DAYS = 2;
 
-    static final String PREFS = "helio";
+    public static final String PREFS = "helio";
     static final String KEY_AUTH = "auth_key";
+    /**
+     * The bonded device the user told us is their strap, by MAC address.
+     *
+     * <p><b>Why an address and not a better name match</b> (2026-08-19, from a
+     * public report on 1.0.6). The reporter said their strap was connected and
+     * syncing and that a serial number they could see matched theirs, while
+     * Atlas said it was not paired. What the log actually establishes is only
+     * this: five devices were bonded to that phone, four named as earbuds and
+     * one named {@code ADMINISTRATOR}, and {@code matchesStrapName} rejected all
+     * five.
+     *
+     * <p><b>Answered by the reporter on the same day: none of the five was the
+     * strap.</b> {@code ADMINISTRATOR} is their laptop. So the strap was not
+     * bonded to that phone at all, and no list built from
+     * {@code getBondedDevices} could ever have shown it - which is why
+     * {@code listBondedDevices} also reports what is merely <i>connected</i>. A
+     * BLE device can hold a GATT connection having never been bonded, and that is
+     * now the live hypothesis for a strap that plainly works while Atlas cannot
+     * see it.
+     *
+     * <p>The address override still earns its place, and not only for that
+     * reporter: it is the general answer to a strap Atlas cannot name, whatever
+     * the reason. A name rule loose enough to catch an arbitrary name would also
+     * match headphones, which is the one thing a Bluetooth connect must never do.
+     *
+     * <p>So the choice is handed to the person who can actually see the strap.
+     * An address is stable, is what {@code connectGatt} wants anyway, and a wrong
+     * pick costs a failed connect and another go. Empty until somebody chooses.
+     */
+    public static final String KEY_STRAP_ADDRESS = "strap_address";
     static final String KEY_ENABLED = "background_enabled";
-    static final String KEY_LAST_SYNC = "last_sync";
+    public static final String KEY_LAST_SYNC = "last_sync";
     static final String KEY_LAST_BATTERY = "last_battery";
+    /**
+     * The newest live reading and when it arrived.
+     *
+     * <p>Stored rather than held in a field because the notification is rebuilt
+     * from prefs on paths that do not run through the listener, and because an
+     * age is the only honest way to draw a reading that is not being refreshed:
+     * the stream stops the moment the screen goes off, so a figure with no
+     * timestamp beside it would silently become a claim about now.
+     */
+    public static final String KEY_LIVE_HR = "live_hr";
+    public static final String KEY_LIVE_HR_AT = "live_hr_at";
+    /**
+     * Every live reading taken during the session in progress, as JSON.
+     *
+     * <p><b>The readings were being thrown away and that was the defect.</b> The
+     * stream produces about one a second while the screen is on, and only the
+     * newest was kept - so a session could be watched live on three surfaces and
+     * then produce an empty recap, because the archive copy does not arrive until
+     * the band hands its window over, which for a short session may be never.
+     * Reported as exactly that: "if we're capturing live bpm to show in the shade,
+     * why can't we show the graph at the end".
+     *
+     * <p>Thinned to one every {@link #TRAIL_MIN_GAP_MS} rather than kept whole:
+     * a chart cannot resolve per-second detail, and this is a SharedPreferences
+     * string re-read on every notification redraw.
+     *
+     * <p>Cleared when a session starts, never merged across two.
+     */
+    public static final String KEY_LIVE_TRAIL = "live_trail";
     static final String KEY_BATTERY_ALERTED = "battery_alerted";
     /**
      * The newest workout start this service has already told you about. Only
@@ -119,6 +202,10 @@ public class HelioSyncService extends Service {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private HelioLink link;
     private boolean syncing;
+    /** The link held purely to stream heart rate, separate from the sync's own. */
+    private HelioLink liveLink;
+    /** Whether the screen is on, which is the only time a live stream is worth holding. */
+    private boolean screenOn = true;
 
     private final List<HelioFetch.Sample> samples = new ArrayList<>();
     private final List<byte[]> sleepSessions = new ArrayList<>();
@@ -156,6 +243,32 @@ public class HelioSyncService extends Service {
         context.startService(new Intent(context, HelioSyncService.class).setAction(ACTION_REFRESH));
     }
 
+    /**
+     * Sync now, asked for from outside the app.
+     *
+     * <p>Exists for the widget's refresh control, and it is only possible because
+     * <b>syncing lives here rather than in the WebView</b>. The widget ticket
+     * rules out anything that would need the preferences bridge to run both ways
+     * and native to reach IndexedDB; this needs neither, because the service
+     * already owns the whole BLE conversation and parks the result in the cache.
+     *
+     * <p>Starts the service first rather than assuming it is up: a widget outlives
+     * the app, and the common case for pressing refresh is that nothing has run
+     * for a while. {@code start} is the guarded path that picks
+     * startForegroundService where required, which matters because a plain
+     * background start throws on modern Android and would take the process down.
+     */
+    public static void syncNow(final Context context) {
+        try {
+            start(context);
+            context.startService(
+                    new Intent(context, HelioSyncService.class).setAction(ACTION_TICK));
+        } catch (final Exception e) {
+            // A refusal to start is not worth taking anything down for; the next
+            // booked tick still runs.
+        }
+    }
+
     @Nullable
     @Override
     public IBinder onBind(final Intent intent) {
@@ -168,6 +281,16 @@ public class HelioSyncService extends Service {
         running = true;
         createChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
+        // **Registered in code, not the manifest.** ACTION_SCREEN_ON and
+        // ACTION_SCREEN_OFF cannot be received by a manifest-declared receiver
+        // at all - Android delivers them only to registered ones - which is the
+        // trap to know about before wondering why nothing fires.
+        final android.content.IntentFilter screenFilter = new android.content.IntentFilter();
+        screenFilter.addAction(Intent.ACTION_SCREEN_ON);
+        screenFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(screenReceiver, screenFilter);
+        final android.os.PowerManager power = getSystemService(android.os.PowerManager.class);
+        screenOn = power == null || power.isInteractive();
         // Asked once at startup rather than discovered from a thrown exception
         // in the middle of the night. A revoked permission is the difference
         // between the smart alarm working and it silently not, and the app can
@@ -196,9 +319,33 @@ public class HelioSyncService extends Service {
         return START_STICKY;
     }
 
+    /**
+     * The screen going on or off is the whole of the live stream's schedule.
+     *
+     * <p>Nothing else needs to decide when to hold the radio: somebody looking
+     * at their phone is exactly the condition under which a live reading is
+     * worth anything, and the moment the screen goes off it is worth nothing at
+     * all.
+     */
+    private final android.content.BroadcastReceiver screenReceiver =
+            new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(final android.content.Context context, final Intent intent) {
+                    if (intent == null || intent.getAction() == null) return;
+                    screenOn = Intent.ACTION_SCREEN_ON.equals(intent.getAction());
+                    updateLiveStream();
+                }
+            };
+
     @Override
     public void onDestroy() {
         running = false;
+        try {
+            unregisterReceiver(screenReceiver);
+        } catch (final IllegalArgumentException ignored) {
+            // Never registered, which happens if onCreate threw part way.
+        }
+        stopLiveStream("service stopping");
         handler.removeCallbacksAndMessages(null);
         // Or a booked run restarts the service after it was deliberately stopped.
         final AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
@@ -716,6 +863,11 @@ public class HelioSyncService extends Service {
         if (syncing) {
             return;
         }
+        // **The stream yields to the sync rather than blocking it.** The strap
+        // takes one central at a time, so a held stream would make every
+        // background sync skip its tick - the link-busy failure this codebase
+        // already knows. It is reopened by updateLiveStream once the sync is done.
+        stopLiveStream("yielding to a sync");
         // The foreground plugin holds its own separate HelioLink, invisible to
         // this service. Skipping this tick (rather than connecting anyway) is
         // enough - the next interval retries, and a foreground sync already in
@@ -829,8 +981,22 @@ public class HelioSyncService extends Service {
 
             @Override
             public void onHeartRate(final int bpm) {
-                // Live mode is a foreground-only feature; the background service
-                // never asks for it and would have nowhere to put it.
+                // **It has somewhere to put it now: a running session.** This
+                // used to be empty with a note saying live mode was a
+                // foreground-only feature. It still is, in the sense that
+                // matters - the stream is only ever held while the screen is on
+                // and a session is running - but the thing holding it is this
+                // service, because the shade and the lock screen are exactly the
+                // surfaces the app cannot draw.
+                if (!HelioFetch.isRealHeartRate(bpm)) return;
+                final long now = System.currentTimeMillis();
+                prefs().edit()
+                        .putInt(KEY_LIVE_HR, bpm)
+                        .putLong(KEY_LIVE_HR_AT, now)
+                        .apply();
+                appendTrail(now, bpm);
+                updateSessionNotification();
+                io.github.atlashealthapp.atlas.widget.AtlasWidgets.refreshAll(HelioSyncService.this);
             }
 
             @Override
@@ -873,6 +1039,9 @@ public class HelioSyncService extends Service {
         } catch (final Exception e) {
             android.util.Log.w("HelioBle", "[bg] could not cache samples: " + e);
         }
+        // Before the samples are cleared, and this is the whole reason a widget
+        // refresh can change anything at all - see carryForward.
+        carryForwardToWidgets();
         // After caching, so a session is announced only once it is parked
         // somewhere the app will actually find it. Announcing first and then
         // failing to store would point at a session that is not there.
@@ -897,6 +1066,324 @@ public class HelioSyncService extends Service {
             link = null;
         }
         updateNotification();
+    }
+
+    /**
+     * Push the one reading the service can honestly own into the published
+     * summary, so a widget refresh visibly does something.
+     *
+     * <p><b>The problem this solves.</b> Everything a widget draws is computed by
+     * the app: the archive lives in IndexedDB and the maths lives in the WebView,
+     * so a sync driven from a widget fetched real readings into a cache and left
+     * every figure on screen exactly as it was. Reported, correctly, as "I'm not
+     * convinced the refresh is forcing it to do anything - it works when I open
+     * the app".
+     *
+     * <p><b>Why heart rate, and why steps joined it.</b> `hrNow` is the newest
+     * sample the band just handed over. There is no averaging, no rounding rule
+     * and no baseline behind it, so writing it here cannot disagree with the
+     * app's own arithmetic - there is none to disagree with.
+     *
+     * <p>Steps were held back on the grounds that a day total needs the archive.
+     * That was right about the archive and wrong about the consequence, and it
+     * was reported on 2026-08-19 in exactly the terms that matter: the heart
+     * widget refreshes and the steps widget does not, from the same press. The
+     * band reports steps as a per-minute <b>increment</b>, so a sum of the
+     * minutes it just handed over is the same arithmetic the app does - no
+     * baseline and no rounding rule. It earns the exception on the identical
+     * three-part test {@link #extendHeartSeries} already passes.
+     *
+     * <p><b>The first version of it added that sum to the published total and
+     * was wrong, measured on the phone within the hour.</b> One press took 820
+     * to 1,640 and the next to 2,460. The premise was that a batch holds only
+     * what is new past the watermark; the log says otherwise - a single sync
+     * carried 820 steps, which was the whole day. The band re-sends the window,
+     * so the app's total already contained every minute being added to it. It
+     * takes the larger of the two now, which cannot double count however many
+     * times it runs.
+     *
+     * <p><b>A score is still not carried.</b> Recovery and the sleep score need
+     * the archive and a baseline, and a second implementation of either is the
+     * thing this payload exists to prevent. Those wait for the app.
+     *
+     * <p>The app overwrites the whole summary on its next publish, so this is a
+     * temporary telling that gets corrected rather than a second source of truth.
+     */
+    private void carryForwardToWidgets() {
+        long newestAt = 0;
+        double newestHr = 0;
+        for (final HelioFetch.Sample sample : samples) {
+            // **`> 0` was not enough and this is where it showed** (2026-08-19).
+            // The band marks a minute it has no reading for with 0xff, so a strap
+            // on its charger published 255 BPM to the widgets. It is filtered at
+            // the decoder now; asking the same question here as well is cheap and
+            // says out loud that this figure is a raw handover with no arithmetic
+            // and therefore no other chance to be sanity-checked.
+            if (!"hr".equals(sample.metric) || !HelioFetch.isRealHeartRate(sample.v)) continue;
+            if (sample.t > newestAt) {
+                newestAt = sample.t;
+                newestHr = sample.v;
+            }
+        }
+        if (newestAt <= 0) return;
+        try {
+            final android.content.SharedPreferences prefs =
+                    getSharedPreferences("CapacitorStorage", MODE_PRIVATE);
+            final String raw = prefs.getString("atlas_summary_native", null);
+            if (raw == null || raw.isEmpty()) return;
+            final org.json.JSONObject summary = new org.json.JSONObject(raw);
+            summary.put("hrNow", (int) Math.round(newestHr));
+            extendHeartSeries(summary);
+            extendSteps(summary);
+            final int battery = prefs().getInt(KEY_LAST_BATTERY, -1);
+            if (battery >= 0) summary.put("strapBattery", battery);
+            prefs.edit().putString("atlas_summary_native", summary.toString()).apply();
+            android.util.Log.i(
+                    "HelioBle", "[bg] carried hrNow=" + Math.round(newestHr) + " to the widgets");
+        } catch (final Exception e) {
+            android.util.Log.w("HelioBle", "[bg] could not carry the reading forward: " + e);
+        }
+    }
+
+    /**
+     * Carry the newly fetched heart rates into the published series, so the
+     * widget's line grows on a refresh rather than only on an app launch.
+     *
+     * <p><b>This is one step further than the reading, and it is deliberate.</b>
+     * Publishing `hrNow` needs no arithmetic at all - it is the last sample - so
+     * it could never disagree with the app. Bucketing into half hours is
+     * arithmetic, which is the thing this codebase keeps out of native. It earns
+     * the exception because the rule is trivial and identical on both sides (the
+     * mean of a bucket), because the app overwrites the whole series on its next
+     * publish, and because the alternative is a chart that visibly stops at the
+     * last time you opened the app while the number above it moves.
+     *
+     * <p>A touched bucket takes the mean of the NEW samples in it, which for a
+     * half-full bucket is slightly different from the app's own answer over the
+     * whole bucket. That difference lasts until the next drain and never leaves
+     * the widget.
+     */
+    /**
+     * How many readings a half hour needs before its mean means anything.
+     *
+     * <p>Mirrors `minSamples` in {@code nativeSummary.js}. The two are a
+     * change-both-or-neither pair, like the smart alarm's decision: nothing can
+     * check they agree, and when they disagree the symptom is a figure that
+     * changes every time the widget is refreshed.
+     */
+    /**
+     * How often a live reading is kept for the trail.
+     *
+     * Five seconds: fine enough that a chart of a ten-minute session has 120
+     * points, coarse enough that an hour is 720 and the string stays small.
+     */
+    private static final long TRAIL_MIN_GAP_MS = 5_000L;
+
+    /**
+     * An hour at five seconds. Past this the oldest go, so the string is bounded.
+     *
+     * Named apart from {@code TRAIL_MAX}, which is the alarm trail's own cap: two
+     * unrelated ring buffers in one class, and the compiler caught the collision.
+     */
+    private static final int HR_TRAIL_MAX = 720;
+
+    /**
+     * The three assignable rows in the expanded shade: container, label, bar,
+     * value. Which metric each holds is decided at draw time from the published
+     * dials, so this is the only place their ids are written down.
+     */
+    /**
+     * The bar bitmap's own size, in pixels.
+     *
+     * A notification's width is not knowable when the bitmap is made, so it is
+     * drawn wide and stretched by {@code fitXY}. Height is small because the bar
+     * is 5dp on screen and a taller bitmap only costs memory.
+     */
+    private static final int BAR_WIDTH_PX = 420;
+    private static final int BAR_HEIGHT_PX = 10;
+
+    private static final int[][] DIAL_ROW_IDS = {
+        {R.id.row_1, R.id.row_label_1, R.id.row_bar_1, R.id.row_val_1},
+        {R.id.row_2, R.id.row_label_2, R.id.row_bar_2, R.id.row_val_2},
+        {R.id.row_3, R.id.row_label_3, R.id.row_bar_3, R.id.row_val_3},
+    };
+
+    private static final int MIN_BUCKET_SAMPLES = 5;
+
+    private void extendHeartSeries(final org.json.JSONObject summary) {
+        try {
+            final org.json.JSONArray series = summary.optJSONArray("hr48");
+            if (series == null || series.length() == 0) return;
+
+            final java.util.Calendar midnight = java.util.Calendar.getInstance();
+            midnight.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            midnight.set(java.util.Calendar.MINUTE, 0);
+            midnight.set(java.util.Calendar.SECOND, 0);
+            midnight.set(java.util.Calendar.MILLISECOND, 0);
+            final long from = midnight.getTimeInMillis();
+            final long bucketMs = 30 * 60_000L;
+
+            final double[] sums = new double[series.length()];
+            final int[] counts = new int[series.length()];
+            for (final HelioFetch.Sample sample : samples) {
+                // A run of 0xff sentinels easily clears MIN_BUCKET_SAMPLES, so
+                // without this a charging strap did not just spike one reading,
+                // it published a half hour averaging 255 into the day's chart.
+                if (!"hr".equals(sample.metric) || !HelioFetch.isRealHeartRate(sample.v)) continue;
+                final int index = (int) ((sample.t - from) / bucketMs);
+                if (index < 0 || index >= series.length()) continue;
+                sums[index] += sample.v;
+                counts[index]++;
+            }
+            boolean changed = false;
+            for (int i = 0; i < counts.length; i++) {
+                // **The app owns every bucket it has already answered; this only
+                // fills the ones it has not.**
+                //
+                // Measured 2026-08-19, and it is the whole reason the figure
+                // flickered. This service fetches the band's entire window,
+                // while the app averages its own archive - which holds only what
+                // has been ingested, and with the app's rate limit that is often
+                // less. So the two computed different means for the same half
+                // hour (the app 89, this 161) and each overwrote the other:
+                // clean after opening the app, wrong after every widget refresh.
+                //
+                // Filling only the null tail keeps what this can honestly add -
+                // the hours since you last opened Atlas - and gives up what it
+                // cannot: a second opinion about a half hour the app has already
+                // judged from the archive it owns.
+                if (!series.isNull(i)) continue;
+                // **The same minimum the app applies, and the two must agree.**
+                // `bucketSeries` in nativeSummary.js withholds a half hour built
+                // from fewer than five readings, because the band reports about
+                // once a minute and a bucket holding one is the strap being
+                // handled rather than worn. Without the rule here, the app
+                // published a clean day and the next widget refresh put the
+                // artifact straight back: measured on 2026-08-19, the card read
+                // 89 MAX, went to 161 MAX on a refresh, and back to 89 after the
+                // app was opened. Change this and change it there.
+                if (counts[i] < MIN_BUCKET_SAMPLES) continue;
+                series.put(i, (int) Math.round(sums[i] / counts[i]));
+                changed = true;
+            }
+            if (!changed) return;
+            summary.put("hr48", series);
+
+            // **The range is the app's to state, and this does not touch it.**
+            //
+            // It used to, twice, and both were wrong in the same way. First it
+            // widened the printed figures against whatever was there, which made
+            // them a ratchet: once a bad reading got in, nothing could bring it
+            // down. Then it recomputed them from this series - honest about the
+            // line, but the line here is half-hourly means taken from a wider
+            // window than the app has ingested, so the widget printed a MIN and
+            // MAX that HeartPage disagreed with. Reported as exactly that.
+            //
+            // The app publishes the day's true extremes from the archive, which
+            // is what the page shows and what the chart is now scaled to.
+            // Carrying the line forward is honest, because it is chart the app
+            // has not seen yet. Restating the day's extremes from a partial view
+            // is not.
+        } catch (final Exception e) {
+            android.util.Log.w("HelioBle", "[bg] could not extend the heart series: " + e);
+        }
+    }
+
+    /**
+     * Carry the steps the band just handed over into the published total.
+     *
+     * <p><b>A sum of increments, which is the only reason this is allowed.</b>
+     * The band reports steps as one byte per minute - an increment, not a
+     * running total - so adding the minutes in this batch to the total the app
+     * last published gives exactly what the app would compute over the same
+     * samples. No baseline, no percentile, no rounding rule.
+     *
+     * <p><b>Two guards, and both are about which day it is.</b> Samples before
+     * local midnight belong to yesterday and must not be added to today; and a
+     * summary the app published yesterday is a yesterday total, so adding to it
+     * would invent a figure rather than extend one. In that case nothing is
+     * carried and the widget keeps saying what it said until the app runs, which
+     * is the honest answer for a day this service cannot total on its own.
+     *
+     * <p>Adding the batch once per fetch is correct because the batch is what is
+     * new past the watermark. Two background syncs before the app opens each add
+     * their own new minutes; the app then overwrites the whole summary from the
+     * archive and the carried figure stops existing.
+     */
+    private void extendSteps(final org.json.JSONObject summary) {
+        try {
+            if (summary.isNull("steps")) return;
+
+            final java.util.Calendar midnight = java.util.Calendar.getInstance();
+            midnight.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            midnight.set(java.util.Calendar.MINUTE, 0);
+            midnight.set(java.util.Calendar.SECOND, 0);
+            midnight.set(java.util.Calendar.MILLISECOND, 0);
+            final long from = midnight.getTimeInMillis();
+
+            // A total the app published before midnight is yesterday's. Extending
+            // it would put this morning's steps on the end of last night's count.
+            if (summary.optLong("at", 0L) < from) return;
+
+            long batch = 0;
+            final long bucketMs = 30 * 60_000L;
+            final org.json.JSONArray series = summary.optJSONArray("steps48");
+            final long[] perBucket = new long[series == null ? 0 : series.length()];
+            for (final HelioFetch.Sample sample : samples) {
+                if (!"steps".equals(sample.metric) || sample.v <= 0) continue;
+                if (sample.t < from) continue;
+                batch += (long) sample.v;
+                final int index = (int) ((sample.t - from) / bucketMs);
+                if (index >= 0 && index < perBucket.length) perBucket[index] += (long) sample.v;
+            }
+            if (batch <= 0) return;
+
+            // **The larger of the two, never the sum.** A batch that covers the
+            // whole day IS the day, so its sum is the answer; a batch that
+            // covers part of it is worth less than the total the app already
+            // published from the archive. Taking the larger is right in both
+            // cases, is the same answer however many times it runs, and matches
+            // what a step count can do - a day's total only ever rises.
+            final long published = summary.optLong("steps");
+            final long total = Math.max(published, batch);
+            if (total <= published) return;
+            summary.put("steps", total);
+
+            // **The fill has to move with the figure.** Leaving it is the one
+            // outcome worse than not carrying at all: a gauge that disagrees with
+            // the number printed above it. This is the same division the app does
+            // in `fillPct`, which is the rule this payload exists to keep out of
+            // native - carved here for the same reason and on the same terms as
+            // the heart series, and unwound by the app's next publish.
+            if (!summary.isNull("stepsGoal")) {
+                final long goal = summary.optLong("stepsGoal");
+                if (goal > 0) {
+                    summary.put(
+                            "stepsPct",
+                            (int) Math.max(0, Math.min(100, Math.round((total * 100.0) / goal))));
+                }
+            }
+
+            // The curve is cumulative, so it is rebuilt from the batch rather
+            // than nudged: the running total at each half hour is what the shape
+            // means. Each point takes the larger of what was published and what
+            // the batch says, for the same reason the total does - a partial
+            // batch must not pull the curve down under itself.
+            if (series != null) {
+                long running = 0;
+                for (int i = 0; i < series.length(); i++) {
+                    running += perBucket[i];
+                    if (running <= 0) continue;
+                    series.put(i, Math.max(series.isNull(i) ? 0 : series.optLong(i), running));
+                }
+                summary.put("steps48", series);
+            }
+            android.util.Log.i(
+                    "HelioBle",
+                    "[bg] carried steps " + published + " -> " + total + " (batch " + batch + ")");
+        } catch (final Exception e) {
+            android.util.Log.w("HelioBle", "[bg] could not carry the steps forward: " + e);
+        }
     }
 
     /**
@@ -1067,6 +1554,108 @@ public class HelioSyncService extends Service {
                 CHANNEL_SESSION, "Sessions", NotificationManager.IMPORTANCE_DEFAULT);
         session.setDescription("Tells you when a workout from the strap has arrived");
         getSystemService(NotificationManager.class).createNotificationChannel(session);
+
+        // DEFAULT so it reaches the lock screen, silent so it does not announce
+        // itself every time a sync re-posts it. See CHANNEL_SESSION_LIVE.
+        final NotificationChannel live = new NotificationChannel(
+                CHANNEL_SESSION_LIVE, "Session in progress", NotificationManager.IMPORTANCE_DEFAULT);
+        live.setDescription("Shows a session you started in Atlas while it is running");
+        live.setSound(null, null);
+        live.enableVibration(false);
+        live.setShowBadge(false);
+        getSystemService(NotificationManager.class).createNotificationChannel(live);
+    }
+
+    /**
+     * The shade while a session Atlas started is running.
+     *
+     * <p><b>Atlas cannot stop it from here and does not pretend to.</b> The
+     * session record lives in localStorage, which Java cannot reach, so STOP
+     * opens the app at the session sheet and the app ends it. That is the same
+     * division the widgets already run on: the app is the authority and native
+     * restates it. An action that wrote a "stop requested" flag for the app to
+     * pick up later was the alternative, and it would put a second author on the
+     * one record whose start time nobody can reconstruct.
+     *
+     * <p>The elapsed time is a {@link android.widget.Chronometer} with its base
+     * set to the real start, so SystemUI counts it in its own process. Nothing
+     * here wakes to keep it moving, which is the only way a live clock is
+     * affordable on a notification that may sit there for an hour.
+     */
+    private Notification buildSessionNotification(final JSONObject session) {
+        final long startedAt = session.optLong("startedAt");
+        final String typeName = session.isNull("typeName") ? null : session.optString("typeName");
+        final String label = typeName == null || typeName.trim().isEmpty()
+                ? "Session in progress"
+                : typeName;
+
+        final Intent stopIntent = new Intent(this, MainActivity.class)
+                .putExtra("atlas_open", "session")
+                .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        final PendingIntent stop = PendingIntent.getActivity(
+                this, 1, stopIntent,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
+        final RemoteViews view = new RemoteViews(getPackageName(), R.layout.notif_session);
+        view.setTextViewText(R.id.session_label, label.toUpperCase(Locale.getDefault()));
+        // The wall-clock start, which the counting clock beside it cannot say.
+        view.setTextViewText(
+                R.id.session_started,
+                String.format(Locale.getDefault(), "Started %tR", startedAt));
+
+        // **The heart rate, and whether it is current.** The stream only runs
+        // while the screen is on, so a reading here is either live or it is a
+        // memory - and the difference has to be on the card. A figure with no age
+        // beside it silently becomes a claim about now the moment the screen goes
+        // off, which is the whole reason the timestamp is stored with it.
+        // **The same line the widget prints**, from one implementation, so the
+        // two surfaces cannot disagree about whether the strap is connected.
+        final String hr = liveHeartRateLabel(this, startedAt);
+        if (hr != null) {
+            final int dot = hr.indexOf(" · ");
+            view.setViewVisibility(R.id.session_bpm, android.view.View.VISIBLE);
+            view.setTextViewText(R.id.session_bpm, dot < 0 ? hr : hr.substring(0, dot));
+            view.setViewVisibility(
+                    R.id.session_zone,
+                    dot < 0 ? android.view.View.GONE : android.view.View.VISIBLE);
+            if (dot >= 0) view.setTextViewText(R.id.session_zone, hr.substring(dot + 3));
+        } else {
+            view.setViewVisibility(R.id.session_bpm, android.view.View.GONE);
+            view.setViewVisibility(R.id.session_zone, android.view.View.GONE);
+        }
+        // **elapsedRealtime, not currentTimeMillis.** Chronometer counts against
+        // the monotonic clock, so a base taken from wall time is out by however
+        // long the phone has been up - which on a phone that has been awake for
+        // days is a clock reading in years.
+        view.setChronometer(
+                R.id.session_clock,
+                android.os.SystemClock.elapsedRealtime() - (System.currentTimeMillis() - startedAt),
+                null,
+                true);
+
+        return new Notification.Builder(this, CHANNEL_SESSION_LIVE)
+                // Re-posted after every sync and every live reading, so without
+                // this the lock screen would light up each time.
+                .setOnlyAlertOnce(true)
+                .setContentTitle(label)
+                .setContentText(String.format(Locale.getDefault(), "Started %tR", startedAt))
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentIntent(stop)
+                .setOngoing(true)
+                .setShowWhen(false)
+                // **Readable on the lock screen, unlike the ordinary one.** The
+                // day's notification stays PRIVATE because it carries a Recovery
+                // score and a protein total, which are nobody else's business on
+                // a phone lying face up on a desk. A session in progress is a
+                // different kind of fact: it is the thing you most want to see
+                // without unlocking, it is the only way to notice you left one
+                // running, and "Indoor Climbing, 42 minutes" says nothing about
+                // your health. Split rather than raised for both.
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setStyle(new Notification.DecoratedCustomViewStyle())
+                .setCustomContentView(view)
+                .addAction(new Notification.Action.Builder(null, "STOP", stop).build())
+                .build();
     }
 
     private Notification buildNotification() {
@@ -1240,30 +1829,72 @@ public class HelioSyncService extends Service {
     private RemoteViews expandedView(final JSONObject summary, final String status) {
         final RemoteViews views = new RemoteViews(getPackageName(), R.layout.notif_expanded);
 
-        String recovery = null;
-        if (!summary.isNull("recovery")) {
-            final String band = str(summary, "recoveryBand");
-            recovery = summary.optInt("recovery") + (band == null ? "" : " " + band);
+        // **The rows follow the dials Home is showing, in their order.**
+        // They used to be a fixed five, so somebody whose chosen dials were
+        // Recovery, Steps and Weight got a shade about protein they had never
+        // logged. The app already publishes the dials it is drawing - the widgets
+        // read the same field - so the shade reads them too rather than keeping a
+        // second opinion about what matters.
+        final org.json.JSONArray dials = summary.optJSONArray("dials");
+        boolean stepsIsADial = false;
+        for (int slot = 0; slot < DIAL_ROW_IDS.length; slot++) {
+            final org.json.JSONObject dial =
+                    dials == null ? null : dials.optJSONObject(slot);
+            if (dial == null) {
+                views.setViewVisibility(DIAL_ROW_IDS[slot][0], View.GONE);
+                continue;
+            }
+            if ("steps".equals(dial.optString("key"))) stepsIsADial = true;
+            views.setViewVisibility(DIAL_ROW_IDS[slot][0], View.VISIBLE);
+            views.setTextViewText(
+                    DIAL_ROW_IDS[slot][1],
+                    dial.optString("label", "").toUpperCase(Locale.getDefault()));
+            // The dial's own text, which is the figure the app decided to show:
+            // a second formatting here is how a shade ends up disagreeing with
+            // the screen it mirrors.
+            final String sub = dial.isNull("sub") ? null : dial.optString("sub");
+            final String text = dial.optString("text", "--");
+            // -1 rather than null: a negative is how a missing percentage is
+            // said here. A boxed null compiles and throws on unboxing, which in
+            // a foreground service is Android killing the process.
+            final int pct = dial.isNull("pct") ? -1 : dial.optInt("pct");
+            views.setTextViewText(
+                    DIAL_ROW_IDS[slot][3],
+                    sub == null || sub.isEmpty() ? text : text + " · " + sub);
+            // **Drawn rather than tinted, so it keeps its family colour.** A
+            // ProgressBar's tint is not remotable below API 31, so an assignable
+            // row could only ever be grey - which threw away the one thing the
+            // colour was doing. Spark draws every mark in the widget set for the
+            // same reason.
+            if (pct < 0) {
+                views.setViewVisibility(DIAL_ROW_IDS[slot][2], View.INVISIBLE);
+            } else {
+                views.setViewVisibility(DIAL_ROW_IDS[slot][2], View.VISIBLE);
+                views.setImageViewBitmap(
+                        DIAL_ROW_IDS[slot][2],
+                        io.github.atlashealthapp.atlas.widget.Spark.bar(
+                                pct, BAR_WIDTH_PX, BAR_HEIGHT_PX, toneColour(dial)));
+            }
         }
-        mark(views, R.id.row_bar_recovery, R.id.row_val_recovery, fill(summary, "recoveryPct"), recovery);
 
-        mark(views, R.id.row_bar_sleep, R.id.row_val_sleep, fill(summary, "sleepPct"),
-                str(summary, "sleepText"));
-
-        mark(views, R.id.row_bar_protein, R.id.row_val_protein, fill(summary, "proteinPct"),
-                summary.isNull("protein") || summary.isNull("proteinGoal")
-                        ? null
-                        : summary.optInt("protein") + " / " + summary.optInt("proteinGoal"));
-
-        mark(views, R.id.row_bar_steps, R.id.row_val_steps, fill(summary, "stepsPct"),
-                summary.isNull("steps")
-                        ? null
-                        : String.format(Locale.getDefault(), "%,d", summary.optLong("steps")));
+        // **Steps only when it is not already up there.** It is the one metric
+        // worth stating whether or not it was chosen, because it accumulates
+        // whether or not you look - but saying it twice is just saying it twice.
+        views.setViewVisibility(R.id.row_steps, stepsIsADial ? View.GONE : View.VISIBLE);
+        if (!stepsIsADial) {
+            mark(views, R.id.row_bar_steps, R.id.row_val_steps, fill(summary, "stepsPct"),
+                    summary.isNull("steps")
+                            ? null
+                            : String.format(Locale.getDefault(), "%,d", summary.optLong("steps")));
+        }
 
         // The routine keeps its dots. Nine things you have to do is not a
         // proportion, and which ones are empty is the part worth seeing.
         final int due = summary.optInt("routineDue", 0);
         final int done = summary.optInt("routineDone", 0);
+        // A routine nobody has set up is not a routine you are failing, so the
+        // row goes rather than showing an empty rank of dots.
+        views.setViewVisibility(R.id.row_routine, due > 0 ? View.VISIBLE : View.GONE);
         for (int i = 0; i < DOT_IDS.length; i++) {
             if (i >= due) {
                 views.setViewVisibility(DOT_IDS[i], View.GONE);
@@ -1288,7 +1919,334 @@ public class HelioSyncService extends Service {
             R.id.dot_6, R.id.dot_7, R.id.dot_8, R.id.dot_9,
     };
 
+    /**
+     * The running session, as a notification of its own.
+     *
+     * <p><b>Its own id, and that is the whole fix.</b> It was returned from
+     * {@link #buildNotification()} and posted under {@code NOTIFICATION_ID},
+     * which is the foreground service's notification - and a foreground service
+     * notification is bound to the channel it was started with. Re-posting the
+     * same id on a different channel does not move it, so which channel you got
+     * depended on which path last touched it, and the lock screen showed it or
+     * did not depending on nothing the user could see. Reported exactly that way:
+     * inconsistent, and seemingly dependent on what screen you locked from.
+     *
+     * <p>So the service keeps its own notification saying what the day looks
+     * like, and a session in progress is a second one on a channel that reaches
+     * the lock screen. It also reads better: the two are different kinds of
+     * thing, and the session no longer hides the day's figures.
+     */
+    /**
+     * Hold a live heart-rate stream while the screen is on and a session is
+     * running, and drop it the moment either stops being true.
+     *
+     * <p><b>Screen-on rather than a timer, and continuous rather than bursts.</b>
+     * A burst pays the full connect-and-authenticate cost every time - seconds,
+     * not milliseconds - to deliver one reading that is immediately going stale,
+     * so it is the worst of both. Tying it to the screen spends the radio only
+     * while somebody is actually looking, which on a 45-minute session is a small
+     * fraction of it, and gives a genuinely live figure for that whole time.
+     *
+     * <p><b>It must yield to a sync and never compete with one.</b> The strap
+     * takes one BLE central at a time, and a stream held while the app tries to
+     * sync is the link-busy failure this codebase has already been bitten by. So
+     * nothing is opened while a sync is in flight, and a sync starting stands the
+     * stream down first.
+     */
+    private void updateLiveStream() {
+        final boolean wanted = screenOn && sessionRunning();
+        if (!wanted) {
+            stopLiveStream("no longer wanted");
+            return;
+        }
+        // A sync owns the link while it runs and will call back here when it is
+        // done, so there is nothing to do but wait.
+        if (liveLink != null || syncing || HelioLink.isLinkActive()) return;
+
+        final String authKey = prefs().getString(KEY_AUTH, null);
+        if (authKey == null || authKey.isEmpty()) return;
+        final byte[] liveKey;
+        try {
+            liveKey = HelioBlePlugin.parseAuthKey(authKey);
+        } catch (final IllegalArgumentException e) {
+            return;
+        }
+
+        liveLink = new HelioLink(this, new HelioLink.Listener() {
+            @Override
+            public void onLog(final String message) {
+            }
+
+            @Override
+            public void onReady() {
+            }
+
+            @Override
+            public void onAuthResult(final boolean success, final String detail) {
+            }
+
+            @Override
+            public void onBattery(final int levelPercent, final boolean charging) {
+            }
+
+            @Override
+            public void onSleepSessions(final List<byte[]> sessions) {
+            }
+
+            @Override
+            public void onWorkouts(final List<HelioFetch.Workout> found) {
+            }
+
+            @Override
+            public void onSamples(final List<HelioFetch.Sample> found) {
+            }
+
+            @Override
+            public void onFetchComplete() {
+            }
+
+            @Override
+            public void onHeartRate(final int bpm) {
+                if (!HelioFetch.isRealHeartRate(bpm)) return;
+                final long now = System.currentTimeMillis();
+                prefs().edit()
+                        .putInt(KEY_LIVE_HR, bpm)
+                        .putLong(KEY_LIVE_HR_AT, now)
+                        .apply();
+                appendTrail(now, bpm);
+                updateSessionNotification();
+                io.github.atlashealthapp.atlas.widget.AtlasWidgets.refreshAll(HelioSyncService.this);
+            }
+
+            @Override
+            public void onClosed(final String reason) {
+                liveLink = null;
+            }
+        }, liveKey);
+
+        // sinceDays 0: this link fetches nothing at all. It exists to stream.
+        liveLink.connect(0, true);
+        trail(System.currentTimeMillis(), "live stream opened");
+    }
+
+    /**
+     * The live heart-rate line, as the shade and the widget both print it.
+     *
+     * <p><b>One implementation, because two would drift.</b> The widget is a
+     * different process's RemoteViews and the notification is this one's, but
+     * they are describing the same reading, and a card saying ZONE 3 beside a
+     * shade saying "4 min ago" would be the app disagreeing with itself about
+     * whether the strap is connected.
+     *
+     * <p>Returns null when there is nothing worth saying: no reading, one from
+     * before this session started, or one old enough to belong to a different
+     * part of the day. A caller hides its row on null rather than printing a
+     * dash, which reads as a reading that failed rather than one not taken.
+     */
+    public static String liveHeartRateLabel(final Context context, final long sessionStartedAt) {
+        final SharedPreferences prefs = context.getSharedPreferences(PREFS, MODE_PRIVATE);
+        final int bpm = prefs.getInt(KEY_LIVE_HR, -1);
+        final long at = prefs.getLong(KEY_LIVE_HR_AT, 0);
+        if (bpm <= 0 || at <= 0) return null;
+        if (sessionStartedAt > 0 && at < sessionStartedAt) return null;
+        final long ageMs = System.currentTimeMillis() - at;
+        if (ageMs > 30 * 60_000L) return null;
+        // Under fifteen seconds the stream is up and the reading describes what
+        // you are doing, so it earns a zone. Past that it is a memory, and how
+        // old it is matters more than which band it was in.
+        if (ageMs < 15_000L) {
+            final int zone = zoneForStatic(context, bpm);
+            return zone > 0 ? bpm + " BPM · ZONE " + zone : bpm + " BPM";
+        }
+        return bpm + " BPM · " + agoLabelStatic(ageMs);
+    }
+
+    /**
+     * Where the newest reading sits across the zone gauge, 0 to 1, or null.
+     *
+     * <p>Measured from half of maximum to maximum, which is the gauge's own span
+     * and the same one {@code zonePosition} uses in the app. Null when there is
+     * no usable reading, so the gauge draws its scale with no caret rather than
+     * parking one at zero and claiming a heart rate of nothing.
+     */
+    public static Float liveZoneFraction(final Context context, final long sessionStartedAt) {
+        final SharedPreferences prefs = context.getSharedPreferences(PREFS, MODE_PRIVATE);
+        final int bpm = prefs.getInt(KEY_LIVE_HR, -1);
+        final long at = prefs.getLong(KEY_LIVE_HR_AT, 0);
+        if (bpm <= 0 || at <= 0) return null;
+        if (sessionStartedAt > 0 && at < sessionStartedAt) return null;
+        if (System.currentTimeMillis() - at > 30 * 60_000L) return null;
+        final int age = profileAge(context);
+        if (age <= 0) return null;
+        final double max = Math.round(208 - 0.7 * age);
+        final double from = max * 0.5;
+        if (max <= from) return null;
+        return (float) Math.max(0, Math.min(1, (bpm - from) / (max - from)));
+    }
+
+    /** The age the app publishes, or 0. */
+    private static int profileAge(final Context context) {
+        try {
+            final String raw = context
+                    .getSharedPreferences("CapacitorStorage", MODE_PRIVATE)
+                    .getString("atlas_summary_native", null);
+            if (raw == null || raw.isEmpty()) return 0;
+            final JSONObject profile = new JSONObject(raw).optJSONObject("profile");
+            return profile == null ? 0 : profile.optInt("age", 0);
+        } catch (final Exception e) {
+            return 0;
+        }
+    }
+
+    /**
+     * The two ends of the zone scale, or null without an age to derive them.
+     *
+     * <p>Half of maximum to maximum, matching {@code zones()} in the app. Printed
+     * under the gauge because the scale does not begin at zero, and a gauge whose
+     * axis is hidden is five coloured boxes.
+     */
+    public static int[] zoneScale(final Context context) {
+        final int age = profileAge(context);
+        if (age <= 0) return null;
+        final int max = (int) Math.round(208 - 0.7 * age);
+        return new int[] {(int) Math.round(max * 0.5), max};
+    }
+
+    /** The zone the newest reading is in, in words, or null. */
+    public static String liveZoneName(final Context context, final long sessionStartedAt) {
+        final Float fraction = liveZoneFraction(context, sessionStartedAt);
+        if (fraction == null) return null;
+        final SharedPreferences prefs = context.getSharedPreferences(PREFS, MODE_PRIVATE);
+        final int zone = zoneForStatic(context, prefs.getInt(KEY_LIVE_HR, -1));
+        return zone > 0 ? "Zone " + zone : null;
+    }
+
+    /** Static twin of {@link #zoneFor}, for callers with no service instance. */
+    private static int zoneForStatic(final Context context, final int bpm) {
+        try {
+            final String raw = context
+                    .getSharedPreferences("CapacitorStorage", MODE_PRIVATE)
+                    .getString("atlas_summary_native", null);
+            if (raw == null || raw.isEmpty()) return 0;
+            final JSONObject profile = new JSONObject(raw).optJSONObject("profile");
+            final int age = profile == null ? 0 : profile.optInt("age", 0);
+            if (age <= 0 || bpm <= 0) return 0;
+            final double fraction = bpm / (double) Math.round(208 - 0.7 * age);
+            if (fraction < 0.5) return 0;
+            if (fraction >= 0.9) return 5;
+            if (fraction >= 0.8) return 4;
+            if (fraction >= 0.7) return 3;
+            if (fraction >= 0.6) return 2;
+            return 1;
+        } catch (final Exception e) {
+            return 0;
+        }
+    }
+
+    private static String agoLabelStatic(final long ageMs) {
+        final long mins = Math.max(0, ageMs / 60_000L);
+        if (mins < 1) return "MOMENTS AGO";
+        if (mins == 1) return "1 MIN AGO";
+        return mins + " MIN AGO";
+    }
+
+    /**
+     * Keep a live reading for the recap, thinned and bounded.
+     *
+     * <p>Read-modify-write on a preferences string, which is affordable because
+     * it happens at most once every five seconds and only while a session is
+     * running with the screen on.
+     */
+    private void appendTrail(final long at, final int bpm) {
+        try {
+            final SharedPreferences prefs = prefs();
+            final org.json.JSONArray trail =
+                    new org.json.JSONArray(prefs.getString(KEY_LIVE_TRAIL, "[]"));
+            if (trail.length() > 0) {
+                final org.json.JSONArray last = trail.optJSONArray(trail.length() - 1);
+                if (last != null && at - last.optLong(0) < TRAIL_MIN_GAP_MS) return;
+            }
+            // [time, bpm] pairs rather than objects: this string is re-read on
+            // every redraw, and the keys would be most of its bytes.
+            final org.json.JSONArray point = new org.json.JSONArray();
+            point.put(at);
+            point.put(bpm);
+            trail.put(point);
+
+            final org.json.JSONArray trimmed;
+            if (trail.length() > HR_TRAIL_MAX) {
+                trimmed = new org.json.JSONArray();
+                for (int i = trail.length() - HR_TRAIL_MAX; i < trail.length(); i++) {
+                    trimmed.put(trail.get(i));
+                }
+            } else {
+                trimmed = trail;
+            }
+            prefs.edit().putString(KEY_LIVE_TRAIL, trimmed.toString()).apply();
+        } catch (final org.json.JSONException e) {
+            // A corrupt trail is a missing chart, not a reason to stop streaming.
+            prefs().edit().remove(KEY_LIVE_TRAIL).apply();
+        }
+    }
+
+    private void stopLiveStream(final String why) {
+        if (liveLink == null) return;
+        final HelioLink closing = liveLink;
+        liveLink = null;
+        closing.disconnect("live: " + why);
+        // The reading stays in prefs with its timestamp, so whatever draws it can
+        // say how old it is rather than pretending it is current.
+        updateSessionNotification();
+    }
+
+    /** Whether the app has published a session in progress. */
+    private boolean sessionRunning() {
+        final JSONObject summary = summary();
+        final JSONObject session = summary == null ? null : summary.optJSONObject("session");
+        return session != null && session.optLong("startedAt", 0) > 0;
+    }
+
+    /**
+     * The colour a dial's bar takes, from the family the app said it belongs to.
+     *
+     * <p>Resolved against {@code notif_*}, which follow the SHADE's night mode
+     * rather than Atlas's theme - the same rule the rest of this notification
+     * obeys, and the reason nothing here reads {@code atlas_theme_native}.
+     *
+     * <p>Recovery's tone arrives banded ({@code recovery-good}), because on the
+     * widgets the band changes the colour. Here it does not: the shade has one
+     * gold for Recovery and the band is already in the value beside it.
+     */
+    private int toneColour(final JSONObject dial) {
+        final String tone = dial.optString("tone", "");
+        final int res;
+        if (tone.startsWith("recovery")) res = R.color.notif_recovery;
+        else if ("body".equals(tone)) res = R.color.notif_body;
+        else if ("intake".equals(tone)) res = R.color.notif_intake;
+        else if ("activity".equals(tone)) res = R.color.notif_activity;
+        else res = R.color.notif_accent;
+        return getResources().getColor(res, getTheme());
+    }
+
+    private void updateSessionNotification() {
+        final NotificationManager manager = getSystemService(NotificationManager.class);
+        final JSONObject summary = summary();
+        final JSONObject session = summary == null ? null : summary.optJSONObject("session");
+        if (session == null || session.optLong("startedAt", 0) <= 0) {
+            manager.cancel(NOTIFICATION_ID_SESSION_LIVE);
+            return;
+        }
+        manager.notify(NOTIFICATION_ID_SESSION_LIVE, buildSessionNotification(session));
+    }
+
     private void updateNotification() {
+        updateSessionNotification();
+        // A session may have just started or stopped, which changes whether a
+        // stream is wanted at all.
+        updateLiveStream();
         getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, buildNotification());
+        // The widget renders from the same published summary, so it goes stale in
+        // exactly the same way and is redrawn at exactly the same moment.
+        io.github.atlashealthapp.atlas.widget.AtlasWidgets.refreshAll(this);
     }
 }

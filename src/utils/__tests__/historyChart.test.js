@@ -191,3 +191,31 @@ describe("trimLeadingBlanks", () => {
     expect(trimLeadingBlanks(null, has)).toEqual([]);
   });
 });
+
+describe("barGeometry gaps", () => {
+  it("marks a day with no reading, in the slot it would have occupied", () => {
+    // Reported as "it should be more obvious on the missed days". Ten of the
+    // last thirty creatine days had no entry and the chart drew nothing for any
+    // of them, so a sparse fortnight and a full one looked alike.
+    const g = barGeometry([5, null, 5], 5);
+    expect(g.gaps).toHaveLength(1);
+    expect(g.gaps[0].i).toBe(1);
+    // Against the same slot in a chart where that day HAS a reading, since with
+    // a gap at index 1 the second bar is the one for index 2.
+    const full = barGeometry([5, 5, 5], 5);
+    expect(g.gaps[0].x).toBeCloseTo(full.bars[1].x, 5);
+    expect(g.gaps[0].w).toBeCloseTo(full.bars[1].w, 5);
+  });
+
+  it("does NOT mark a recorded zero, which is a different fact", () => {
+    // A zero is something you know. Marking it the same way would also mark
+    // every day a strap went unworn and rolled up to zero, turning "no idea"
+    // into "you did nothing".
+    const g = barGeometry([5, 0, 5], 5);
+    expect(g.gaps).toHaveLength(0);
+  });
+
+  it("has no gaps when every day was recorded", () => {
+    expect(barGeometry([1, 2, 3], 3).gaps).toHaveLength(0);
+  });
+});

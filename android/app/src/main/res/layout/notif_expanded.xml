@@ -1,5 +1,18 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<!-- The rows. Same five things the collapsed strip shows, named, plus steps.
+<!-- The rows, and **which rows they are is decided by the app, not by this file**
+     (2026-08-20). Home lets you choose three dials; the shade used to show a fixed
+     five regardless, so somebody whose dials were Recovery, Steps and Weight got a
+     notification about protein they had never logged. It now follows the dial
+     order, then the routine, then steps only when steps is not already a dial.
+
+     **The three dial bars are DRAWN, not ProgressBars.** A ProgressBar's tint is
+     not remotable before API 31 and Atlas supports 26, so a slot that can hold any
+     metric could not carry that metric's family colour - it went grey, which threw
+     away the one thing the colour was doing. A bitmap can be any colour on any
+     API, which is exactly why every mark in the widget set is one. The fixed rows
+     below keep their ProgressBars: their colour is known at build time.
+
+     Same five things the collapsed strip shows, named, plus steps.
      Label / mark / figure is the same object Home's MetricRow is, so the shade
      borrows the app's vocabulary rather than inventing one for itself.
 
@@ -12,8 +25,9 @@
     android:paddingTop="2dp"
     android:paddingBottom="2dp">
 
-    <!-- RECOVERY -->
+    <!-- Dial slot 1. Which metric this is depends on what Home is showing. -->
     <LinearLayout
+        android:id="@+id/row_1"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -22,30 +36,30 @@
         android:paddingBottom="4dp">
 
         <TextView
+            android:id="@+id/row_label_1"
             android:layout_width="74dp"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
             android:textSize="10sp"
             android:letterSpacing="0.13"
             android:textAllCaps="true"
+            android:maxLines="1"
+            android:ellipsize="end"
             android:textColor="@color/notif_dim"
-            android:text="Recovery" />
+            android:text="" />
 
-        <ProgressBar
-            android:id="@+id/row_bar_recovery"
-            style="?android:attr/progressBarStyleHorizontal"
+        <ImageView
+            android:id="@+id/row_bar_1"
             android:layout_width="0dp"
-            android:layout_height="4dp"
+            android:layout_height="5dp"
             android:layout_weight="1"
             android:layout_marginStart="10dp"
             android:layout_marginEnd="10dp"
-            android:max="100"
-            android:progressDrawable="@drawable/notif_track"
-            android:progressTint="@color/notif_recovery"
-            android:progressBackgroundTint="@color/notif_recovery_track" />
+            android:scaleType="fitXY"
+            android:contentDescription="@null" />
 
         <TextView
-            android:id="@+id/row_val_recovery"
+            android:id="@+id/row_val_1"
             android:layout_width="82dp"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
@@ -57,8 +71,9 @@
             android:text="--" />
     </LinearLayout>
 
-    <!-- SLEEP -->
+    <!-- Dial slot 2. Which metric this is depends on what Home is showing. -->
     <LinearLayout
+        android:id="@+id/row_2"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -67,30 +82,76 @@
         android:paddingBottom="4dp">
 
         <TextView
+            android:id="@+id/row_label_2"
             android:layout_width="74dp"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
             android:textSize="10sp"
             android:letterSpacing="0.13"
             android:textAllCaps="true"
+            android:maxLines="1"
+            android:ellipsize="end"
             android:textColor="@color/notif_dim"
-            android:text="Sleep" />
+            android:text="" />
 
-        <ProgressBar
-            android:id="@+id/row_bar_sleep"
-            style="?android:attr/progressBarStyleHorizontal"
+        <ImageView
+            android:id="@+id/row_bar_2"
             android:layout_width="0dp"
-            android:layout_height="4dp"
+            android:layout_height="5dp"
             android:layout_weight="1"
             android:layout_marginStart="10dp"
             android:layout_marginEnd="10dp"
-            android:max="100"
-            android:progressDrawable="@drawable/notif_track"
-            android:progressTint="@color/notif_body"
-            android:progressBackgroundTint="@color/notif_body_track" />
+            android:scaleType="fitXY"
+            android:contentDescription="@null" />
 
         <TextView
-            android:id="@+id/row_val_sleep"
+            android:id="@+id/row_val_2"
+            android:layout_width="82dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:gravity="end"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_ink"
+            android:text="--" />
+    </LinearLayout>
+
+    <!-- Dial slot 3. Which metric this is depends on what Home is showing. -->
+    <LinearLayout
+        android:id="@+id/row_3"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/row_label_3"
+            android:layout_width="74dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:letterSpacing="0.13"
+            android:textAllCaps="true"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/notif_dim"
+            android:text="" />
+
+        <ImageView
+            android:id="@+id/row_bar_3"
+            android:layout_width="0dp"
+            android:layout_height="5dp"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:scaleType="fitXY"
+            android:contentDescription="@null" />
+
+        <TextView
+            android:id="@+id/row_val_3"
             android:layout_width="82dp"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
@@ -103,8 +164,12 @@
     </LinearLayout>
 
     <!-- ROUTINE. Dots rather than a bar: nine things you have to do is not a
-         proportion, and the gaps are what say which part of the day is untouched. -->
+         proportion, and the gaps are what say which part of the day is untouched.
+
+         Hidden outright when no habit is due, rather than showing an empty row of
+         dots: a routine nobody has set up is not a routine you are failing. -->
     <LinearLayout
+        android:id="@+id/row_routine"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -216,53 +281,9 @@
             android:text="--" />
     </LinearLayout>
 
-    <!-- PROTEIN -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp">
-
-        <TextView
-            android:layout_width="74dp"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textSize="10sp"
-            android:letterSpacing="0.13"
-            android:textAllCaps="true"
-            android:textColor="@color/notif_dim"
-            android:text="Protein" />
-
-        <ProgressBar
-            android:id="@+id/row_bar_protein"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="0dp"
-            android:layout_height="4dp"
-            android:layout_weight="1"
-            android:layout_marginStart="10dp"
-            android:layout_marginEnd="10dp"
-            android:max="100"
-            android:progressDrawable="@drawable/notif_track"
-            android:progressTint="@color/notif_intake"
-            android:progressBackgroundTint="@color/notif_intake_track" />
-
-        <TextView
-            android:id="@+id/row_val_protein"
-            android:layout_width="82dp"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textSize="12sp"
-            android:gravity="end"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:textColor="@color/notif_ink"
-            android:text="--" />
-    </LinearLayout>
-
     <!-- STEPS -->
     <LinearLayout
+        android:id="@+id/row_steps"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"

@@ -120,6 +120,58 @@ export async function putSamples(samples, onProgress) {
   return samples.length;
 }
 
+/**
+ * Delete samples and frozen rollups whose timestamps cannot be real.
+ *
+ * **Written as a migration every install runs, not as a repair of one phone.**
+ * The archive that turned this up held 155 of them out of 123,666, all `hrv`,
+ * dated between 1973 and 2106, which had frozen 75 rollup rows for dates like
+ * 2105-09-08. Anybody who has synced this app before the ingest guard landed has
+ * some, in whatever number their own strap produced, and none of them can ever
+ * be read back: a date that does not exist is never asked for.
+ *
+ * What it removes is defined by the same window the ingest guard uses, so the
+ * two cannot disagree about what counts as junk. Nothing inside that window is
+ * touched however odd it looks: a reading being surprising is not evidence it is
+ * wrong, and this is the one operation here that cannot be undone.
+ *
+ * Returns what it removed, so the caller can record it rather than delete
+ * silently.
+ */
+export async function purgeImplausible(fromMs, toMs) {
+  const db = await openSampleDb();
+
+  const samples = await done(tx(db, SAMPLES, "readonly").getAll());
+  const doomed = samples.filter((s) => !(s.t >= fromMs && s.t <= toMs));
+  if (doomed.length) {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(SAMPLES, "readwrite");
+      const store = transaction.objectStore(SAMPLES);
+      for (const s of doomed) store.delete([s.metric, s.t]);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  // A rollup is keyed by date rather than by timestamp, so it is judged by the
+  // day it claims to describe.
+  const from = new Date(fromMs).toLocaleDateString("sv");
+  const to = new Date(toMs).toLocaleDateString("sv");
+  const rollups = await done(tx(db, ROLLUPS, "readonly").getAll());
+  const badDates = rollups.filter((r) => r.date < from || r.date > to).map((r) => r.date);
+  if (badDates.length) {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(ROLLUPS, "readwrite");
+      const store = transaction.objectStore(ROLLUPS);
+      for (const date of badDates) store.delete(date);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  return { samples: doomed.length, rollups: badDates.length };
+}
+
 export async function getSamples(metric, fromMs, toMs) {
   // IDBKeyRange.bound throws DataError for an exclusive-upper range whose
   // bounds are equal or inverted (toMs <= fromMs), rather than just matching
@@ -288,6 +340,22 @@ export async function exportArchive() {
     read(WORKOUTS),
   ]);
   return { samples, meta, rollups, workouts };
+}
+
+/**
+ * How many readings the archive holds.
+ *
+ * **`count()` rather than `getAll().length`**, which is the whole reason this can
+ * sit on a settings row: IndexedDB counts a store without materialising it, while
+ * `exportArchive` above reads every row and is measured in tens of megabytes on
+ * this phone. One is a number, the other is a stall.
+ *
+ * Exists so the backup row can say what it is about to hand you. A row that can
+ * lose 97,000 readings and says nothing invites the tap that loses them.
+ */
+export async function countSamples() {
+  const db = await openSampleDb();
+  return done(tx(db, SAMPLES, "readonly").count());
 }
 
 /**
