@@ -84,9 +84,9 @@ export const useProfileStore = defineStore("profile", () => {
   }
 
   /**
-   * First letters of the first and last words: "Ada Lovelace" gives AL, a
-   * single "Josh" gives J. Falls back to a dash rather than empty so the chip
-   * keeps its shape and stays a visible tap target with no name set.
+   * First letters of the first and last words: "Ada Lovelace" gives AL, and a
+   * single name gives its first letter. Falls back to a dash rather than empty
+   * so the chip keeps its shape and stays a visible tap target with no name set.
    */
   const initials = computed(() => {
     const parts = name.value.trim().split(/\s+/).filter(Boolean);

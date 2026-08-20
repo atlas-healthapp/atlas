@@ -54,7 +54,7 @@ public class HelioLinkNameTest {
         // A false positive opens a GATT connection to the wrong device, which
         // fails later and far less legibly than not finding anything at all.
         assertFalse(HelioLink.matchesStrapName("Galaxy Buds Pro"));
-        assertFalse(HelioLink.matchesStrapName("Josh's Car"));
+        assertFalse(HelioLink.matchesStrapName("Car Audio"));
         assertFalse(HelioLink.matchesStrapName("Amazfit GTR 4"));
         assertFalse(HelioLink.matchesStrapName("Mi Band 7"));
         assertFalse(HelioLink.matchesStrapName("Helios Speaker"));

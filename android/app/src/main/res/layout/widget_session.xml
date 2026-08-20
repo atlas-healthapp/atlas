@@ -29,26 +29,25 @@
         android:orientation="horizontal"
         android:baselineAligned="false">
 
+        <!-- **The label takes a weighted cell rather than wrapping.** With the
+             label wrapping and equal spacers either side of the mark, the mark
+             centres in what is LEFT of the row after the label, not in the card:
+             the other cards balance it with a refresh control on the right, and
+             this one deliberately has none. A weighted cell each side puts the
+             mark on the card's own centre line. -->
         <TextView
             android:id="@+id/session_label"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:layout_gravity="center_vertical"
             android:fontFamily="monospace"
             android:textSize="13sp"
             android:letterSpacing="0.18"
             android:maxLines="1"
+            android:ellipsize="end"
             android:textColor="@color/widget_dim"
             android:text="@string/widget_session_label" />
-
-        <!-- TextView rather than Space: a plain View is not on the RemoteViews
-             whitelist, which the notification learned by being killed for it. -->
-        <TextView
-            android:id="@+id/session_gap_a"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:importantForAccessibility="no" />
 
         <TextView
             android:id="@+id/session_mark"
@@ -62,6 +61,8 @@
             android:textColor="@color/widget_dim"
             android:text="@string/widget_wordmark" />
 
+        <!-- TextView rather than Space: a plain View is not on the RemoteViews
+             whitelist, which the notification learned by being killed for it. -->
         <TextView
             android:id="@+id/session_gap_b"
             android:layout_width="0dp"

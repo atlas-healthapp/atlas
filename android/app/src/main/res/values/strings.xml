@@ -16,8 +16,8 @@
     <string name="widget_steps_name">Atlas · Steps</string>
     <string name="widget_heart_name">Atlas · Heart</string>
     <string name="widget_heart_label">HEART</string>
-    <string name="widget_session_label">SESSION</string>
-    <string name="widget_session_name">Atlas · Session</string>
+    <string name="widget_session_label">ACTIVITY</string>
+    <string name="widget_session_name">Atlas · Activity Session</string>
     <string name="widget_session_idle">No session running</string>
     <string name="widget_session_idle_hint">Tap to start one</string>
     <string name="widget_session_description">A session you started in Atlas, while it runs.</string>
