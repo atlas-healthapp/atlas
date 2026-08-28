@@ -21,6 +21,10 @@ import { rollupsForDate } from "@/utils/dailyRollup";
 import { BODY_METRICS, isMeaningful } from "@/utils/bodyMetrics";
 import { sleepMinutesToHours } from "@/utils/huamiSleep";
 import { today } from "@/utils/date";
+// Used by commitWorkouts. Absent since 2026-08-27, and a plain ReferenceError
+// rather than a quiet no-op: the `.catch()` on the call site cannot help,
+// because the throw happens before there is a promise to catch on.
+import { publishWorkoutFloor } from "@/utils/nativeSummary";
 
 export const RETENTION_DAYS = 90;
 const DAY_MS = 24 * 60 * 60 * 1000;
