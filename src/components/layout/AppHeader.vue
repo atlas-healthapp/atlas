@@ -38,7 +38,7 @@ import ProfileChip from "@/components/layout/ProfileChip.vue";
 import PeakMark from "@/components/layout/PeakMark.vue";
 import RunningSessionRow from "@/components/activity/RunningSessionRow.vue";
 import { useUIStore } from "@/stores/ui";
-import { useHelioStore } from "@/stores/helio";
+import { useHelioStore, DRAIN_PHASE } from "@/stores/helio";
 
 const props = defineProps({
   /** The bold word: FUEL DB, BODY, FITNESS. */
@@ -72,7 +72,7 @@ const shownMeta = computed(() => {
   // The drain moves the numbers without `syncing` ever going true on the
   // rate-limited path, which is what let Recovery change while the app claimed
   // to be current. Same reasoning as Home's sync line.
-  if (helio.draining) return helio.syncPhase || "UPDATING";
+  if (helio.draining) return helio.syncPhase || DRAIN_PHASE;
   return props.meta;
 });
 </script>

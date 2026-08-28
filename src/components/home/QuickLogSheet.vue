@@ -130,7 +130,7 @@ function save() {
 }
 .fieldname {
   text-align: center;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.5px;
   color: var(--dim);
   margin-bottom: 6px;
@@ -155,7 +155,7 @@ function save() {
   text-align: center;
 }
 .val span {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--dim);
   margin-left: 4px;
 }
@@ -182,7 +182,7 @@ function save() {
 .save {
   width: 100%;
   text-align: center;
-  font-size: 13px;
+  font-size: 14.5px;
   letter-spacing: 2px;
   color: var(--bg1);
   background: var(--acc);
@@ -198,7 +198,7 @@ function save() {
   border: 1px solid color-mix(in srgb, var(--dim) 38%, transparent);
   border-radius: 7px;
   color: var(--dim);
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1.6px;
   cursor: pointer;
 }

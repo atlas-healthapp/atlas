@@ -180,31 +180,6 @@ function openSheet(id) {
 </script>
 
 <style scoped>
-.page {
-  position: fixed;
-  inset: 0;
-  z-index: 600;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg1);
-  color: var(--body);
-  font-family: var(--font-sans);
-  padding: calc(12px + env(safe-area-inset-top)) 18px
-    calc(20px + env(safe-area-inset-bottom));
-  overflow: hidden;
-  animation: pagein 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-@keyframes pagein {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .page {
-    animation: none;
-  }
-}
 .pscroll {
   flex: 1;
   min-height: 0;
@@ -232,7 +207,7 @@ function openSheet(id) {
   color: var(--dim);
 }
 .k {
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 2px;
   color: var(--dim);
 }
@@ -242,7 +217,7 @@ function openSheet(id) {
   min-width: 0;
 }
 .next .v {
-  font-size: 14.5px;
+  font-size: 15.5px;
   color: var(--fam-activity);
 }
 
@@ -257,7 +232,7 @@ function openSheet(id) {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 2.4px;
   color: var(--dim);
   margin-bottom: 2px;
@@ -329,7 +304,7 @@ function openSheet(id) {
   transform: rotate(-45deg);
 }
 .t {
-  font-size: 14.5px;
+  font-size: 15.5px;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -417,7 +392,7 @@ function openSheet(id) {
 .hline .n {
   flex: 1;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   color: var(--dim);
   overflow: hidden;
@@ -426,7 +401,7 @@ function openSheet(id) {
 }
 .hline .p {
   flex: none;
-  font-size: 10.5px;
+  font-size: 13.5px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }

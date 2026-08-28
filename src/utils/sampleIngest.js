@@ -103,6 +103,15 @@ export async function ingestSamples(samples, sourceId, onProgress) {
 export async function commitWorkouts(workouts) {
   if (!workouts || workouts.length === 0) return new Set();
   await putWorkouts(workouts);
+  // **Told to native here, because this is the one funnel every path goes
+  // through.** The background service announces a landed session against its
+  // own watermark and cannot see the app's fetches, so without this a session
+  // pulled in by hand is announced by the service half an hour later as news.
+  // Fire and forget, and native-only: a failed write costs one stale
+  // notification and nothing else, which is the same contract publishSummary
+  // has.
+  const newest = Math.max(...workouts.map((w) => w.startMillis ?? 0));
+  publishWorkoutFloor(newest).catch(() => null);
   return new Set(workouts.map((w) => new Date(w.startMillis).toLocaleDateString("sv")));
 }
 

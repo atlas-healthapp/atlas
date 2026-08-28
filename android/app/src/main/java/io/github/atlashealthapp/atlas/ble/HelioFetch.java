@@ -377,6 +377,26 @@ final class HelioFetch {
      * before {@code setTimeZone} would bake in the phone's zone and no later
      * correction can undo it, which is exactly the ten-hour error above.
      */
+    /**
+     * The UTC offset the band last reported, in minutes, or {@link Integer#MIN_VALUE}.
+     *
+     * <p><b>The band keeps its own clock and Atlas does not set it.</b> Zepp
+     * does, so somebody who flies and never opens Zepp has a strap still in the
+     * old zone - and an alarm is written as a bare wall-clock hour, so it rings
+     * at the old local time. That is not hypothetical: {@link #parseStartDate}
+     * exists because a band reporting UTC against a phone on AEST decoded
+     * workouts ten hours out.
+     *
+     * <p>Atlas cannot fix this yet (setting the clock needs a config endpoint it
+     * does not speak) but it can see it, because every fetch reply carries the
+     * offset. Recording it is what lets the app say so instead of leaving
+     * somebody to find out at 07:00.
+     *
+     * <p>Static because this is a reading rather than state: the newest value
+     * wins and nothing needs the history.
+     */
+    static volatile int lastReportedOffsetMinutes = Integer.MIN_VALUE;
+
     static long parseStartDate(final byte[] payload, final int offset) {
         final Calendar c = Calendar.getInstance();
         final int year = (payload[offset] & 0xff) | ((payload[offset + 1] & 0xff) << 8);
@@ -393,6 +413,10 @@ final class HelioFetch {
             final TimeZone reported = TimeZone.getTimeZone("UTC");
             reported.setRawOffset(payload[offset + 7] * 15 * 60 * 1000);
             c.setTimeZone(reported);
+            // Recorded on the way past. The band is telling us which zone it
+            // thinks it is in, and that is the only way to know it disagrees
+            // with the phone.
+            lastReportedOffsetMinutes = payload[offset + 7] * 15;
         }
         return c.getTimeInMillis();
     }

@@ -503,7 +503,7 @@ const verdict = computed(() => {
   const afternoon = averageBetween(samples.value, 720, 1080);
   const overnight = averageBetween(samples.value, 0, 360);
   if (afternoon != null && overnight != null && afternoon - overnight > 20) {
-    return "Calm overnight, and well up through the afternoon.";
+    return "Calm overnight, high through the afternoon.";
   }
   if (afternoon != null && overnight != null && afternoon - overnight < 5) {
     return "Much the same all day, without a clear peak.";
@@ -516,31 +516,6 @@ const info = METRICS.stress.info;
 
 <style scoped>
 
-.page {
-  position: fixed;
-  inset: 0;
-  z-index: 600;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg1);
-  color: var(--body);
-  font-family: var(--font-sans);
-  padding: calc(12px + env(safe-area-inset-top)) 18px
-    calc(20px + env(safe-area-inset-bottom));
-  overflow: hidden;
-  animation: pagein 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-@keyframes pagein {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .page {
-    animation: none;
-  }
-}
 .pscroll {
   flex: 1;
   min-height: 0;
@@ -568,7 +543,7 @@ const info = METRICS.stress.info;
   min-width: 0;
 }
 .band {
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
 }
 .verdict {
@@ -583,7 +558,7 @@ const info = METRICS.stress.info;
   margin-top: 0;
 }
 .boxlabel {
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 2px;
   color: var(--dim);
   margin: 24px 0 10px;
@@ -601,7 +576,7 @@ const info = METRICS.stress.info;
 .axis {
   display: flex;
   justify-content: space-between;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.6px;
   color: var(--dim);
   margin-top: 5px;
@@ -612,7 +587,7 @@ const info = METRICS.stress.info;
   position: relative;
   height: 13px;
   margin-top: 5px;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.6px;
   color: var(--dim);
 }
@@ -633,7 +608,7 @@ const info = METRICS.stress.info;
   flex-wrap: wrap;
   gap: 13px;
   margin-top: 10px;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -652,13 +627,13 @@ const info = METRICS.stress.info;
   gap: 12px;
   min-height: 46px;
   border-top: 1px solid color-mix(in srgb, var(--dim) 12%, transparent);
-  font-size: 14px;
+  font-size: 15px;
 }
 .ctxrow:first-of-type {
   border-top: 0;
 }
 .cv {
-  font-size: 12.5px;
+  font-size: 14px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -742,7 +717,7 @@ const info = METRICS.stress.info;
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
   padding-top: 6px;

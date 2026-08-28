@@ -1,3 +1,5 @@
+import { charWidth } from "@/utils/labelWidth";
+
 // Where a day's sessions and its bedtime sit on a shared clock axis.
 //
 // Pure geometry, because the component that draws it is template-shaped and
@@ -51,17 +53,67 @@ export function clockTime(ms) {
 }
 
 /**
- * Roughly how wide one character of `.mk` is, in the chart's own viewBox units.
- *
- * 8.5px mono at 0.8px letter-spacing, measured against the 300-unit viewBox the
- * chart draws in. Approximate on purpose: this decides whether two labels are
- * allowed to sit near each other, and being a unit out changes nothing, while
- * measuring text properly would mean rendering it first.
+ * The type `.mk` is set in, in `RecoveryPage.vue`. `dayMarkers.test.js` reads
+ * that rule out of the component and fails if these drift from it, which is the
+ * check that did not exist when the pair below last went stale.
  */
-const CHAR_W = 5.9;
+export const MK_FONT_PX = 11;
+export const MK_LETTER_SPACING = 0.8;
+
+/**
+ * How wide one character of `.mk` is, in the chart's own viewBox units.
+ *
+ * **Derived, because remembering it is what broke.** This read 5.9 for months,
+ * which was right for the 8.5px the label was set in when the chart was written
+ * and wrong from the moment the type scale went up on 2026-08-27. Nothing said
+ * so: `placeLabels` went on declaring pairs clear that were overlapping by a
+ * quarter of their width, and the first anyone knew was a session's time printed
+ * across a bedtime on the phone.
+ *
+ * Approximate is still fine - a unit either way changes nothing about which
+ * labels survive - but it has to be approximately the CURRENT type, and the only
+ * way to keep that true is to compute it from the size rather than store the
+ * answer.
+ */
+const CHAR_W = charWidth(MK_FONT_PX, MK_LETTER_SPACING);
 
 /** The drawable span, x=6 to x=294 in a 300-unit viewBox. */
 const AXIS_UNITS = 288;
+/** Where that span starts, and the box it sits in. The component no longer
+ *  computes either: it draws every label at `labelX()`, so there is one
+ *  statement of where a label goes rather than two that can disagree. */
+const AXIS_X0 = 6;
+const VIEW_W = 300;
+
+/**
+ * Least clear space between two labels, in viewBox units.
+ *
+ * One character. Touching is not overlapping, but `18:50→20:4901:30` is what
+ * touching looks like on a phone, and it is no more readable than an overlap.
+ */
+const LABEL_GAP = CHAR_W;
+
+/**
+ * Where a label will actually be drawn, as `{ from, to }` in viewBox units.
+ *
+ * **This exists because collision and edge-fitting were solved separately and
+ * disagreed about the answer.** `placeLabels` reserved space for every label as
+ * if it sat centred on its own mark, while the edge rule moved the ones near the
+ * ends - so a label was cleared in one position and drawn in another.
+ *
+ * Measured on the real archive for 2026-08-28: a bedtime of 01:30 sits at 97.5%
+ * of the axis, so `01:30` was displaced 20 units left and occupied 246.8 to
+ * 286.8 rather than the 266.8 to 306.8 it was cleared against. The session label
+ * beside it ran to 248.8. Two units of overlap, and on the phone the card read
+ * `18:50→20:4901:30`.
+ *
+ * So position is decided in ONE place, `labelPlacement`, and both the collision
+ * test and the component's own `x` read it from there.
+ */
+export function labelExtent(at, text, opts) {
+  const { from, to, x, mark, shifted } = labelPlacement(at, text, opts);
+  return { from, to, x, mark, shifted };
+}
 
 /**
  * Which labels can be drawn without running into each other.
@@ -84,37 +136,70 @@ export function gapNeeded(a, b) {
 }
 
 /**
- * Which way a label at `x` has to hang so it stays inside the drawing.
+ * Where a label has to sit so it stays inside the drawing, given the mark it
+ * belongs to.
  *
  * **`placeLabels` solves labels colliding with each other; this solves a label
- * colliding with the edge**, which is a different problem and was unsolved. Both
- * ends of the waking day are drawn centred on their own mark, and the first mark
- * of the day sits at the very start of the axis: a 06:01 wake put WOKE and its
- * time centred on x=6 in a 300-wide box, so both hung off the left and the card
- * clipped them to "OKE" and ":01".
+ * colliding with the edge.** Both ends of the waking day are drawn on their own
+ * mark, and the first mark of the day sits at the very start of the axis: a
+ * 06:01 wake put WOKE and its time centred on x=6 in a 300-wide box, so both
+ * hung off the left and the card clipped them to "OKE" and ":01".
  *
- * Anchoring rather than nudging the position, because the label has to keep
- * pointing at its own mark. `dayAxis`'s hour ticks already do exactly this for
- * the same reason; this is that rule made available to everything else.
+ * **Moved by the least amount that keeps it inside, rather than re-anchored.**
+ * This used to return a `text-anchor`, flipping an edge label to `start` or
+ * `end`, which displaces it by *half its own width* however little was actually
+ * needed. Measured on 2026-08-28: a 01:30 bedtime at 97.5% of the axis needed
+ * 8.8 units of room and was given 20, so the label sat visibly left of the dot
+ * it named and ate the space its neighbour needed. Reported as both halves of
+ * that - the session's times could not fit beside it, and the bedtime was not
+ * under its own mark.
+ *
+ * A clamp keeps the label as close to its mark as the box allows, which is what
+ * the anchoring was reaching for: the earlier note here said a label has to keep
+ * pointing at its own mark, and this points at it strictly better.
  */
-export function labelAnchor(x, text, { width = 300, pad = 2 } = {}) {
+export function labelPlacement(at, text, { width = VIEW_W, pad = 2 } = {}) {
+  const mark = AXIS_X0 + at * AXIS_UNITS;
   const half = ((text?.length ?? 0) * CHAR_W) / 2;
-  if (x - half < pad) return "start";
-  if (x + half > width - pad) return "end";
-  return "middle";
+  let x = mark;
+  if (x - half < pad) x = pad + half;
+  if (x + half > width - pad) x = width - pad - half;
+  return { x, mark, from: x - half, to: x + half, shifted: Math.abs(x - mark) > 0.01 };
 }
 
-export function placeLabels(candidates = []) {
+/** Just the x a label should be drawn at, for the component's template. */
+export function labelX(at, text, opts) {
+  return labelPlacement(at, text, opts).x;
+}
+
+export function placeLabels(candidates = [], opts = {}) {
   const kept = [];
   return candidates.map((c) => {
-    if (c.at == null || !c.text) return { ...c, show: false };
-    const halfWidth = (c.text.length * CHAR_W) / 2;
-    const clears = kept.every((k) => {
-      const need = (halfWidth + (k.text.length * CHAR_W) / 2) / AXIS_UNITS;
-      return Math.abs(k.at - c.at) >= need;
-    });
-    if (clears) kept.push(c);
-    return { ...c, show: clears };
+    // **A candidate may offer several ways of saying itself, best first.** Each
+    // carries its own position, because a shorter wording usually points
+    // somewhere else: `18:50→20:49` belongs midway between the two ends it
+    // names, and the `18:50` it falls back to belongs on the start it names.
+    //
+    // Dropping is the last resort rather than the first. On the day this was
+    // found the merged label could not clear a 01:30 bedtime, and the choice was
+    // between saying nothing at all about the session and saying when it began.
+    // The note above already called throwing away a fact the row exists to carry
+    // the wrong answer.
+    const options = c.options ?? [{ text: c.text, at: c.at }];
+    for (const option of options) {
+      if (option.at == null || !option.text) continue;
+      const ext = labelExtent(option.at, option.text, opts);
+      // Real intervals, not the distance between two centres. That distance is
+      // only a proxy for overlap while every label is centred, and `labelExtent`
+      // exists precisely because they are not.
+      const clears = kept.every((k) => ext.from >= k.to + LABEL_GAP || ext.to <= k.from - LABEL_GAP);
+      if (clears) {
+        kept.push(ext);
+        return { ...c, show: true, text: option.text, at: option.at };
+      }
+    }
+    const first = options[0] ?? {};
+    return { ...c, show: false, text: first.text ?? null, at: first.at ?? null };
   });
 }
 
@@ -181,8 +266,13 @@ export function dayRow({ date, sessions = [], bedMs = null, wakeMs = null } = {}
         ? [
             {
               id: `s${i}both`,
-              at: (s.from + s.to) / 2,
-              text: `${s.startText}→${s.endText}`,
+              options: [
+                { text: `${s.startText}→${s.endText}`, at: (s.from + s.to) / 2 },
+                // What is left when both ends will not fit beside a bedtime.
+                // The start rather than the end, for the reason priority order
+                // already gives: when you began is the fact the row is about.
+                { text: s.startText, at: s.from },
+              ],
             },
           ]
         : [
@@ -192,6 +282,7 @@ export function dayRow({ date, sessions = [], bedMs = null, wakeMs = null } = {}
     ),
   ]);
   const shown = new Set(times.filter((t) => t.show).map((t) => t.id));
+  const chosen = new Map(times.map((t) => [t.id, t]));
 
   // The words above the axis are their own line and collide separately. WOKE and
   // BED are drawn by their own template blocks, so only TRAINING needs deciding.
@@ -207,9 +298,12 @@ export function dayRow({ date, sessions = [], bedMs = null, wakeMs = null } = {}
       ...s,
       showStartText: shown.has(`s${i}from`),
       showEndText: shown.has(`s${i}to`),
-      // One label covering both ends, drawn midway, when they cannot fit apart.
-      mergedText: merged[i] ? `${s.startText}→${s.endText}` : null,
-      mergedAt: merged[i] ? (s.from + s.to) / 2 : null,
+      // One label covering both ends, drawn midway, when they cannot fit apart -
+      // or just the start, on its own mark, when even that will not fit. Taken
+      // from what `placeLabels` actually chose rather than recomputed, so the
+      // text and the position it is drawn at cannot disagree.
+      mergedText: merged[i] ? (chosen.get(`s${i}both`)?.text ?? null) : null,
+      mergedAt: merged[i] ? (chosen.get(`s${i}both`)?.at ?? null) : null,
       showMergedText: shown.has(`s${i}both`),
     })),
     bed,

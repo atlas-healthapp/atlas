@@ -58,6 +58,9 @@ public class HelioBlePlugin extends Plugin {
      */
     private volatile byte[] alarmPayload;
 
+    /** The same idea as {@link #alarmPayload}, for a band settings write. */
+    private volatile byte[] configPayload;
+
     /** Mirrored to logcat as well as the panel, so `adb logcat -s HelioBle` captures a whole session. */
     private void emit(final String event, final String message) {
         android.util.Log.i("HelioBle", message);
@@ -197,6 +200,18 @@ public class HelioBlePlugin extends Plugin {
             android.util.Log.i("HelioBle", "alarm set: " + accepted + ", status " + status);
             // Nothing else is coming on this link, so it lets go rather than
             // sitting open on the band's single central slot until it times out.
+            closeLink();
+        }
+
+        @Override
+        public void onBandConfigWritten(final boolean accepted) {
+            final JSObject payload = new JSObject();
+            payload.put("event", "bandConfigSet");
+            payload.put("message", accepted ? "setting saved" : "the strap refused it");
+            payload.put("accepted", accepted);
+            notifyListeners("bleLog", payload);
+            android.util.Log.i("HelioBle", "band config set: " + accepted);
+            // Nothing else is coming on this link, exactly as after an alarm.
             closeLink();
         }
 
@@ -380,8 +395,12 @@ public class HelioBlePlugin extends Plugin {
         // leave a payload behind for the next ordinary sync to send.
         final byte[] alarm = alarmPayload;
         alarmPayload = null;
+        final byte[] config = configPayload;
+        configPayload = null;
         if (alarm != null) {
             target.connectForAlarm(alarm);
+        } else if (config != null) {
+            target.connectForConfig(config);
         } else {
             target.connect(sinceDays != null ? sinceDays : 3, live, workoutSince);
         }
@@ -537,6 +556,15 @@ public class HelioBlePlugin extends Plugin {
                                 HelioSyncService.PREFS, android.content.Context.MODE_PRIVATE)
                         .edit();
 
+        // The whole list, which the service resolves into the single-alarm keys
+        // below on every tick. Written first so a resolve triggered by anything
+        // else sees it. Absent from an older caller, in which case the flat
+        // fields below are the whole truth, exactly as they used to be.
+        final String plan = call.getString("plan", null);
+        if (plan != null) {
+            edit.putString(AlarmPlan.KEY_PLAN, plan);
+            edit.putInt(AlarmPlan.KEY_SLOT, call.getInt("slot", 0));
+        }
         edit.putString(SmartAlarm.KEY_MODE, call.getString("mode", "fixed"));
         edit.putInt(SmartAlarm.KEY_HOUR, call.getInt("hour", -1));
         edit.putInt(SmartAlarm.KEY_MINUTE, call.getInt("minute", 0));
@@ -621,6 +649,84 @@ public class HelioBlePlugin extends Plugin {
         } catch (final org.json.JSONException e) {
             result.put("trail", new JSArray());
         }
+        call.resolve(result);
+    }
+
+    /**
+     * Set the band's workout detection sensitivity, over its own link.
+     *
+     * <p><b>Queuing this for the next sync was tried first and was wrong.</b>
+     * The send only ran from the background service's listener, so a sync
+     * started by the app read the setting and never acted on the queue - the
+     * change sat on PENDING for good. This is a thing the user just pressed and
+     * is watching, so it behaves like the alarm: connect, write, answer.
+     *
+     * <p>The group version is the band's own, from the last read. Without one
+     * there is nothing honest to send, so the call is refused rather than
+     * guessing a number the band would ignore in silence.
+     */
+    @PluginMethod
+    public void setDetectionSensitivity(final PluginCall call) {
+        live = false;
+        final Integer level = call.getInt("level");
+        if (level == null || level < 0 || level > 2) {
+            call.reject("level must be 0, 1 or 2");
+            return;
+        }
+        final int version = getContext()
+                .getSharedPreferences(HelioSyncService.PREFS, android.content.Context.MODE_PRIVATE)
+                .getInt(HelioSyncService.KEY_DETECTION_GROUP_VERSION, -1);
+        if (version < 0) {
+            call.reject("the strap has not reported this setting yet");
+            return;
+        }
+        try {
+            configPayload = HelioConfig.setSensitivity((byte) version, level.byteValue());
+        } catch (final IllegalArgumentException e) {
+            call.reject(e.getMessage());
+            return;
+        }
+        requestLink(call);
+    }
+
+    /**
+     * Every morning the alarm has a record for, newest last.
+     *
+     * <p>Returned as the raw records rather than parsed into objects, because
+     * the same string is what somebody pastes into a bug report and two
+     * renderings of one diagnostic is how they end up disagreeing. The app
+     * splits it for display; a person can read it as it stands.
+     */
+    @PluginMethod
+    public void alarmHistory(final PluginCall call) {
+        final android.content.SharedPreferences prefs = getContext()
+                .getSharedPreferences(HelioSyncService.PREFS, android.content.Context.MODE_PRIVATE);
+        final JSObject result = new JSObject();
+        final JSArray mornings = new JSArray();
+        for (final String record : AlarmLog.records(prefs)) {
+            mornings.put(record);
+        }
+        result.put("mornings", mornings);
+        // The live settings beside the history, so a readout can say what is
+        // set for tonight without a second round trip that could disagree.
+        result.put("mode", prefs.getString(SmartAlarm.KEY_MODE, "fixed"));
+        result.put("enabled", prefs.getBoolean(SmartAlarm.KEY_ENABLED, false));
+        result.put("hour", SmartAlarm.hardHour(prefs));
+        result.put("minute", SmartAlarm.hardMinute(prefs));
+        // The band's own UTC offset and the phone's, both in minutes, so the
+        // app can say when the strap is in a different zone. An alarm is a bare
+        // wall-clock hour on the band's own clock, so a mismatch is an alarm
+        // ringing at the wrong local time.
+        result.put("bandOffsetMinutes", prefs.getInt(HelioSyncService.KEY_BAND_OFFSET, Integer.MIN_VALUE));
+        // What the band says its own workout detection is set to. -1 means it
+        // has not answered yet, which a screen must tell apart from HIGH (0).
+        result.put(
+                "detectionSensitivity",
+                prefs.getInt(HelioSyncService.KEY_DETECTION_SENSITIVITY, -1));
+        result.put("detectionAlert", prefs.getInt(HelioSyncService.KEY_DETECTION_ALERT, -1));
+        result.put(
+                "phoneOffsetMinutes",
+                java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000);
         call.resolve(result);
     }
 

@@ -13,6 +13,7 @@
 // fix has the same problem, so the cost compounds.
 
 import { load, persist } from "@/utils/storage";
+import { publishAvailableVersion } from "@/utils/nativeSummary";
 
 const LATEST_URL = "https://api.github.com/repos/atlas-healthapp/atlas/releases/latest";
 const RELEASES_PAGE = "https://github.com/atlas-healthapp/atlas/releases/latest";
@@ -85,6 +86,25 @@ export function cachedUpdate() {
 }
 
 /**
+ * Hand the answer to native, so the background service can say so once.
+ *
+ * **Here rather than at the two call sites.** Home and Settings both ask, and a
+ * mirror written by one of them is a mirror the other forgets: the same defect
+ * `metricRegistry` and `resolveSessions` exist to prevent, one file over. This
+ * runs wherever the question is answered, including from the cache, because a
+ * launch with no network still knows what it knew yesterday and the service
+ * should still be able to say it.
+ *
+ * Deliberately not awaited by callers and never allowed to throw. Whether there
+ * is a newer Atlas is not worth failing a settings screen over, which is the
+ * rule the whole module already runs on.
+ */
+function mirrorToNative(found) {
+  if (!found?.latest) return;
+  publishAvailableVersion(found.latest).catch(() => null);
+}
+
+/**
  * Ask GitHub, at most once every six hours.
  *
  * **Never throws and never rejects.** It is called from app startup and from a
@@ -95,7 +115,11 @@ export function cachedUpdate() {
 export async function checkForUpdate({ force = false } = {}) {
   const cached = load(CACHE_KEY, null);
   const age = cached?.at ? Date.now() - cached.at : Infinity;
-  if (!force && age < MAX_AGE_MS) return cachedUpdate();
+  if (!force && age < MAX_AGE_MS) {
+    const found = cachedUpdate();
+    mirrorToNative(found);
+    return found;
+  }
 
   let controller = null;
   let timer = null;
@@ -106,10 +130,18 @@ export async function checkForUpdate({ force = false } = {}) {
       signal: controller.signal,
       headers: { Accept: "application/vnd.github+json" },
     });
-    if (!response.ok) return cachedUpdate();
+    if (!response.ok) {
+      const found = cachedUpdate();
+      mirrorToNative(found);
+      return found;
+    }
     const body = await response.json();
     const latest = String(body?.tag_name ?? "").replace(/^v/i, "");
-    if (!parseVersion(latest)) return cachedUpdate();
+    if (!parseVersion(latest)) {
+      const found = cachedUpdate();
+      mirrorToNative(found);
+      return found;
+    }
 
     persist(CACHE_KEY, {
       at: Date.now(),
@@ -119,11 +151,15 @@ export async function checkForUpdate({ force = false } = {}) {
       // can run to several screens.
       notes: String(body?.body ?? "").slice(0, 400),
     });
-    return cachedUpdate();
+    const found = cachedUpdate();
+    mirrorToNative(found);
+    return found;
   } catch {
     // Offline, aborted, rate limited, or GitHub having a bad day. The last known
     // answer is still the best one available.
-    return cachedUpdate();
+    const found = cachedUpdate();
+    mirrorToNative(found);
+    return found;
   } finally {
     if (timer) clearTimeout(timer);
   }

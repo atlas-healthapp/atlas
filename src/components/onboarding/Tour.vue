@@ -191,19 +191,19 @@ onBeforeUnmount(() => window.removeEventListener("resize", measure));
   color: var(--body);
 }
 .count {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 2px;
   color: var(--dim);
 }
 .title {
   margin-top: 4px;
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 1.6px;
   color: var(--acc);
 }
 .body {
   margin: 7px 0 0;
-  font-size: 13.5px;
+  font-size: 15px;
   line-height: 1.5;
 }
 .acts {
@@ -218,7 +218,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", measure));
   padding: 0 14px;
   background: none;
   border: 0;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.8px;
   cursor: pointer;
 }

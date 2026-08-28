@@ -231,24 +231,36 @@
               <circle :cx="px(s.to)" cy="30" r="4" :fill="famRecovery" />
               <!-- Two ends that cannot fit side by side become one label between
                    them, so a short session still says both its times. -->
-              <text v-if="s.showMergedText" :x="px(s.mergedAt)" y="46" :text-anchor="anchorAt(px(s.mergedAt), s.mergedText)" class="mk">{{ s.mergedText }}</text>
-              <text v-if="s.showStartText" :x="px(s.from)" y="46" :text-anchor="anchorAt(px(s.from), s.startText)" class="mk">{{ s.startText }}</text>
-              <text v-if="s.showEndText" :x="px(s.to)" y="46" :text-anchor="anchorAt(px(s.to), s.endText)" class="mk">{{ s.endText }}</text>
+              <text v-if="s.showMergedText" :x="labelX(s.mergedAt, s.mergedText)" y="46" text-anchor="middle" class="mk">{{ s.mergedText }}</text>
+              <text v-if="s.showStartText" :x="labelX(s.from, s.startText)" y="46" text-anchor="middle" class="mk">{{ s.startText }}</text>
+              <text v-if="s.showEndText" :x="labelX(s.to, s.endText)" y="46" text-anchor="middle" class="mk">{{ s.endText }}</text>
             </g>
             <!-- The two ends of the waking day. Labelled rather than left as
                  bare dots: wake belongs to the night before this row and bed to
                  the night after, so unlabelled they would read as one sleep. -->
             <template v-if="yesterday.wake != null">
               <circle :cx="px(yesterday.wake)" cy="30" r="4.4" fill="var(--ink)" />
-              <text :x="px(yesterday.wake)" y="17" :text-anchor="anchorAt(px(yesterday.wake), 'WOKE')" class="mk lit">WOKE</text>
-              <text v-if="yesterday.showWakeText" :x="px(yesterday.wake)" y="46" :text-anchor="anchorAt(px(yesterday.wake), yesterday.wakeText)" class="mk">{{ yesterday.wakeText }}</text>
+              <text :x="labelX(yesterday.wake, 'WOKE')" y="17" text-anchor="middle" class="mk lit">WOKE</text>
+              <text v-if="yesterday.showWakeText" :x="labelX(yesterday.wake, yesterday.wakeText)" y="46" text-anchor="middle" class="mk">{{ yesterday.wakeText }}</text>
             </template>
             <template v-if="yesterday.bed != null">
               <circle :cx="px(yesterday.bed)" cy="30" r="4.4" fill="var(--ink)" />
-              <text :x="px(yesterday.bed)" y="17" :text-anchor="anchorAt(px(yesterday.bed), 'BED')" class="mk lit">BED</text>
-              <text v-if="yesterday.showBedText" :x="px(yesterday.bed)" y="46" :text-anchor="anchorAt(px(yesterday.bed), yesterday.bedText)" class="mk">{{ yesterday.bedText }}</text>
+              <text :x="labelX(yesterday.bed, 'BED')" y="17" text-anchor="middle" class="mk lit">BED</text>
+              <text v-if="yesterday.showBedText" :x="labelX(yesterday.bed, yesterday.bedText)" y="46" text-anchor="middle" class="mk">{{ yesterday.bedText }}</text>
             </template>
-            <text v-if="yesterday.showTrainingLabel" :x="px(yesterday.spans[0].from)" y="17" class="mk" :fill="famRecovery">
+            <!-- Anchored like every other label here. It was the one text node
+                 with no text-anchor at all, so it drew from its mark rightward
+                 while placeLabels had reserved it centred - a 32-unit
+                 discrepancy between where it was cleared and where it landed,
+                 which is the same defect labelExtent exists to close. -->
+            <text
+              v-if="yesterday.showTrainingLabel"
+              :x="labelX(yesterday.spans[0].from, 'TRAINING')"
+              y="17"
+              text-anchor="middle"
+              class="mk"
+              :fill="famRecovery"
+            >
               TRAINING
             </text>
           </svg>
@@ -773,7 +785,7 @@ import { dailyValuesForRange } from "@/utils/dailyRollup";
 import { getWorkouts } from "@/utils/sampleDb";
 import { resolveSessions } from "@/components/activity/resolveSessions";
 import { termContext } from "@/components/home/recoveryContext";
-import { dayRow, weekdayLabel, labelAnchor, AXIS_TICKS } from "@/components/home/dayMarkers";
+import { dayRow, weekdayLabel, labelX, AXIS_TICKS } from "@/components/home/dayMarkers";
 import { nightsFrom, axisMinutes, usualWindow } from "@/utils/sleepRegularity";
 import {
   recoveryFor,
@@ -1364,7 +1376,6 @@ const px = (fraction) => 6 + fraction * 288;
 // Keeps a label inside the 300-unit box it is drawn in. The first mark of the
 // waking day sits at x=6, so a centred WOKE hung off the left edge and the card
 // clipped it.
-const anchorAt = (x, text) => labelAnchor(x, text, { width: 300 });
 const wx = (fraction) => 36 + fraction * 258;
 
 const rows = computed(() => recoveryBreakdown(result.value));
@@ -1390,7 +1401,8 @@ const calibratingReadings = computed(() => {
 const explanation = computed(() => recoveryExplanation(result.value));
 const bandLabel = computed(() => {
   if (result.value.state === "calibrating") {
-    return `CALIBRATING · ${result.value.nights}/${result.value.needed} NIGHTS`;
+    // Same phrasing as Home and BODY, so one wait is described one way.
+    return `${result.value.nights} OF ${result.value.needed} NIGHTS`;
   }
   return result.value.state === "ready" ? result.value.label : "NO DATA";
 });
@@ -1572,34 +1584,6 @@ function referenceText(r) {
 
 <style scoped>
 
-.page {
-  position: fixed;
-  inset: 0;
-  z-index: 600;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg1);
-  color: var(--body);
-  font-family: var(--font-sans);
-  /* Safe-area padding on the shell, never on the scrolling child: on the child
-     the inset scrolls away with the content and the header rides up under the
-     status icons. */
-  padding: calc(12px + env(safe-area-inset-top)) 18px
-    calc(20px + env(safe-area-inset-bottom));
-  overflow: hidden;
-  animation: pagein 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-@keyframes pagein {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .page {
-    animation: none;
-  }
-}
 .pscroll {
   flex: 1;
   min-height: 0;
@@ -1629,7 +1613,7 @@ function referenceText(r) {
   min-width: 0;
 }
 .band {
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   color: v-bind(bandColor);
 }
@@ -1647,7 +1631,7 @@ function referenceText(r) {
 }
 
 .boxlabel {
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 2px;
   color: var(--dim);
   margin: 24px 0 12px;
@@ -1697,7 +1681,7 @@ function referenceText(r) {
 .scalelabels {
   display: flex;
   margin-top: 7px;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.2px;
 }
 .scalelabels span {
@@ -1759,7 +1743,7 @@ function referenceText(r) {
 .histaxis {
   display: flex;
   justify-content: space-between;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
   padding-top: 6px;
@@ -1774,7 +1758,7 @@ function referenceText(r) {
   display: flex;
   flex-wrap: wrap;
   gap: 3px 14px;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 1.1px;
   color: var(--dim);
   padding-top: 8px;
@@ -1822,7 +1806,7 @@ function referenceText(r) {
    in the app uses, so a reader recognises it as an axis rather than as a note. */
 .gut {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.4px;
   fill: var(--dim);
 }
@@ -2032,7 +2016,7 @@ function referenceText(r) {
   gap: 8px;
 }
 .edetail-hd {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.4px;
   color: var(--dim);
 }
@@ -2062,10 +2046,25 @@ function referenceText(r) {
   display: block;
 }
 /* Marker labels. A class rather than attributes on every text node, which is
-   how the same size ended up written eleven times in the first draft. */
+   how the same size ended up written eleven times in the first draft.
+
+   **11px, below the 13px the rest of the app floors at, and this chart is
+   allowed it.** That floor is about what reaches the eye, and it was set for
+   HTML text sitting at 1:1. These labels are SVG in a 300-unit viewBox drawn
+   about 351px wide, so they are scaled UP by 1.17 on the way to the screen:
+   measured on the device, 11px here renders at 10.9 CSS px against the floor's
+   own 11.1, which is a sixth of a pixel under it.
+
+   It buys the thing the chart could not otherwise do. This is the densest line
+   in the app - a session's two times and a bedtime on one axis - and at 12px
+   `18:50->20:49` cleared a 01:30 bedtime by 0.9 units, which is a fit on one
+   day's data and a collision on the next. At 11px the margin is 7.8.
+
+   MK_FONT_PX and MK_LETTER_SPACING in dayMarkers.js must match these two
+   figures; dayMarkers.test.js reads this rule and fails if they do not. */
 .mk {
   font-family: var(--font-mono);
-  font-size: 8.5px;
+  font-size: 11px;
   letter-spacing: 0.8px;
   fill: var(--dim);
 }
@@ -2118,7 +2117,7 @@ function referenceText(r) {
 }
 .tnote {
   margin-top: 6px;
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -2132,7 +2131,7 @@ function referenceText(r) {
   gap: 14px;
 }
 .facts dt {
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1.6px;
   color: var(--dim);
   margin-bottom: 4px;

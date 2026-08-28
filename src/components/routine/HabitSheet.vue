@@ -261,13 +261,13 @@ function deleteArchived(h) {
   border: 1px solid color-mix(in srgb, var(--fam-activity) 30%, transparent);
   border-radius: 7px;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: 1px;
 }
 .field::placeholder {
   color: var(--dim);
   letter-spacing: 1.4px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .field:focus {
   outline: none;
@@ -293,7 +293,7 @@ function deleteArchived(h) {
   border-radius: 6px;
   background: none;
   color: var(--dim);
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   cursor: pointer;
 }
@@ -310,7 +310,7 @@ function deleteArchived(h) {
   border-radius: 7px;
   background: var(--fam-activity);
   color: var(--bg1);
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 2px;
   cursor: pointer;
 }
@@ -326,7 +326,7 @@ function deleteArchived(h) {
   border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
   border-radius: 7px;
   color: var(--bad);
-  font-size: 11.5px;
+  font-size: 14px;
   letter-spacing: 1.8px;
   cursor: pointer;
 }
@@ -339,7 +339,7 @@ function deleteArchived(h) {
   background: none;
   border: 0;
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: 14px;
   letter-spacing: 1.8px;
   cursor: pointer;
 }
@@ -354,7 +354,7 @@ function deleteArchived(h) {
   margin-top: 10px;
 }
 .warn {
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1.2px;
   line-height: 1.5;
   color: var(--bad);
@@ -371,7 +371,7 @@ function deleteArchived(h) {
   border: 1px solid color-mix(in srgb, var(--dim) 40%, transparent);
   border-radius: 7px;
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: 14px;
   letter-spacing: 1.8px;
   cursor: pointer;
 }
@@ -387,7 +387,7 @@ function deleteArchived(h) {
 .anm {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--dim);
   text-decoration: line-through;
 }
@@ -398,7 +398,7 @@ function deleteArchived(h) {
   border: 1px solid color-mix(in srgb, var(--fam-activity) 40%, transparent);
   border-radius: 6px;
   color: var(--fam-activity);
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.4px;
   cursor: pointer;
 }
@@ -409,7 +409,7 @@ function deleteArchived(h) {
   border: 1px solid transparent;
   border-radius: 6px;
   color: var(--dim);
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.4px;
   cursor: pointer;
 }

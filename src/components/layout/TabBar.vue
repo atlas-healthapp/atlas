@@ -107,7 +107,7 @@ const tabs = [
   /* Still clears 44pt with the icon and label stacked. */
   padding: 10px 0 12px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.4px;
   font-weight: 600;
   color: var(--dim);

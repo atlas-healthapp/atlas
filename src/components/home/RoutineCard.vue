@@ -156,11 +156,11 @@ const meta = computed(() => {
   cursor: pointer;
 }
 .empty .etitle {
-  font-size: 15px;
+  font-size: 16px;
   color: var(--ink);
 }
 .empty .esub {
-  font-size: 10.5px;
+  font-size: 13.5px;
   line-height: 1.6;
   letter-spacing: 1px;
   color: var(--dim);
@@ -219,7 +219,7 @@ const meta = computed(() => {
   color: var(--dim);
 }
 .t {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -228,7 +228,7 @@ const meta = computed(() => {
 .t.done {
   color: var(--dim);
   letter-spacing: 1.4px;
-  font-size: 12.5px;
+  font-size: 14px;
 }
 .k {
   flex: none;

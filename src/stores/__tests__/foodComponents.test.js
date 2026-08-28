@@ -202,3 +202,91 @@ describe("per-instance components", () => {
     expect(slot(food).protein).toBe(30);
   });
 });
+
+/**
+ * Changing how much of a logged meal you ate.
+ *
+ * The gap this closed: `addSnack` took a quantity when you logged and nothing
+ * could change it afterwards, so one serving becoming two meant deleting the row
+ * and adding it again. Ingredients inside a meal were editable; how much of the
+ * meal was not, which is the more common correction by a long way.
+ *
+ * The rule under every case: a logged entry carries a SNAPSHOT so history
+ * survives the library being edited, so this scales what is stored and never
+ * re-reads the library.
+ */
+describe("setEntryQuantity", () => {
+  let food;
+
+  beforeEach(() => {
+    installLocalStorageShim();
+    setActivePinia(createPinia());
+    food = useFoodStore();
+    for (const item of LIBRARY) food.addLibraryItem({ ...item, kind: item.kind ?? "meal" });
+  });
+
+  const entry = () => food.planForDate("2026-08-27").snacks[0];
+
+  it("doubles a serving without touching the library", () => {
+    food.addSnack("2026-08-27", "chicken", 1, "lunch");
+    const before = entry().protein;
+    food.setEntryQuantity("2026-08-27", "snack", 0, 2);
+    expect(entry().quantity).toBe(2);
+    expect(entry().protein).toBe(before * 2);
+    expect(food.itemById("chicken").protein).toBe(30);
+  });
+
+  it("halves one just as readily", () => {
+    food.addSnack("2026-08-27", "chicken", 2, "lunch");
+    const before = entry().protein;
+    food.setEntryQuantity("2026-08-27", "snack", 0, 1);
+    expect(entry().protein).toBe(Math.round(before / 2));
+  });
+
+  // **The reason it scales the snapshot rather than re-reading it.** An entry is
+  // a record of what you ate, and a recipe edited afterwards must not rewrite it.
+  it("does not pick up a library edit made after logging", () => {
+    food.addSnack("2026-08-27", "chicken", 1, "lunch");
+    const before = entry().protein;
+    food.updateLibraryItem("chicken", { protein: 999 });
+    food.setEntryQuantity("2026-08-27", "snack", 0, 2);
+    expect(entry().protein).toBe(before * 2);
+  });
+
+  it("refuses zero, which is what REMOVE is for", () => {
+    food.addSnack("2026-08-27", "chicken", 1, "lunch");
+    const before = entry().protein;
+    food.setEntryQuantity("2026-08-27", "snack", 0, 0);
+    expect(entry().quantity).toBe(1);
+    expect(entry().protein).toBe(before);
+  });
+
+  // Extras sit beside the parent on purpose: separate things added to one meal
+  // on one day, not part of the portion. Doubling the meal does not double the
+  // egg you put on it.
+  it("never scales an extra with the parent", () => {
+    food.addSnack("2026-08-27", "chicken", 1, "lunch");
+    food.addExtra("2026-08-27", "snack", 0, "cheese", 1);
+    const extraBefore = entry().extras[0].protein;
+    food.setEntryQuantity("2026-08-27", "snack", 0, 2);
+    expect(entry().extras[0].protein).toBe(extraBefore);
+  });
+
+  // A frozen recipe is the truth for that entry, so both halves have to move
+  // together or the list stops adding up to its own header.
+  it("scales a frozen recipe's components and its totals together", () => {
+    food.addSnack("2026-08-27", "dinner", 1, "dinner");
+    food.setComponentQuantity("2026-08-27", "snack", 0, 0, 2);
+    const componentsBefore = entry().components.map((c) => c.protein);
+    const totalBefore = entry().protein;
+
+    food.setEntryQuantity("2026-08-27", "snack", 0, 2);
+
+    entry().components.forEach((c, i) => {
+      expect(c.protein).toBeCloseTo(componentsBefore[i] * 2, 5);
+    });
+    expect(entry().protein).toBe(totalBefore * 2);
+    const summed = entry().components.reduce((sum, c) => sum + (c.protein ?? 0), 0);
+    expect(entry().protein).toBe(Math.round(summed));
+  });
+});

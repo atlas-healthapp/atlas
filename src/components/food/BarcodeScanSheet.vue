@@ -94,7 +94,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 3px;
   color: var(--fam-intake);
   margin-bottom: 16px;
@@ -106,7 +106,7 @@ onMounted(() => {
 .msg {
   text-align: center;
   margin-top: 60px;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 1px;
 }
 </style>

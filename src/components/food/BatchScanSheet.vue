@@ -315,7 +315,7 @@ function saveItemsOnly() {
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 3px;
   color: var(--fam-intake);
   margin-bottom: 16px;
@@ -337,7 +337,7 @@ function saveItemsOnly() {
   padding-bottom: 6px;
 }
 .note {
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 0.3px;
   color: var(--dim);
   padding: 8px 0;
@@ -484,7 +484,7 @@ function saveItemsOnly() {
   border: 1px solid color-mix(in srgb, var(--fam-intake) 45%, transparent);
   color: var(--ink);
   padding: 10px 12px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .scanbtn {
   display: block;
@@ -493,7 +493,7 @@ function saveItemsOnly() {
   margin-top: 18px;
   border: 1px solid color-mix(in srgb, var(--fam-intake) 45%, transparent);
   color: var(--fam-intake);
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   padding: 12px 0;
   min-height: 46px;
@@ -502,7 +502,7 @@ function saveItemsOnly() {
   width: 100%;
   text-align: center;
   margin-top: 8px;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   color: var(--bg1);
   background: var(--fam-intake);
@@ -517,7 +517,7 @@ function saveItemsOnly() {
   width: 100%;
   text-align: center;
   margin-top: 10px;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.5px;
   color: var(--dim);
   min-height: 38px;

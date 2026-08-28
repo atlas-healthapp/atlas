@@ -210,3 +210,20 @@ export function estimateSessionCalories({
 
   return null;
 }
+
+/**
+ * What to print beside a derived figure, in the reader's words.
+ *
+ * **"EST" alone was not enough.** It says the number is not measured and stops,
+ * so a figure built from your own heart rate through the session reads exactly
+ * like one built from an activity name and a clock. The first is within about
+ * 4.2% of the band on this archive and the second manages 9.1% at its most
+ * flattering, so they are not the same claim and should not carry the same word.
+ *
+ * Null for a figure that needs no caption: the band's own, which is measured.
+ */
+export function calorieSourceLabel(source) {
+  if (source === "hr") return "FROM HEART RATE";
+  if (source === "met") return "FROM TYPE AND TIME";
+  return null;
+}

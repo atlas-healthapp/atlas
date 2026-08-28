@@ -300,17 +300,21 @@ export const useFoodStore = defineStore("food", () => {
     }
   }
 
-  // A snack-kind item is always a snack, regardless of what mealType the
-  // caller passes (or doesn't) - only matters for Library's direct LOG
-  // button, since Diary's own add flow already only ever offers snack-kind
-  // items from the Snacks section itself.
+  // The section the caller named wins, always. `kind` says where an item MAY
+  // be used and `mealType` says where this log actually landed, and this used
+  // to force a snack-kind item into SNACKS on the grounds that Diary only ever
+  // offered such items from the Snacks section. It doesn't: the picker's
+  // second list offers everything the kind filter excluded, from every
+  // section. So Nuttelex - filed as a snack because no other kind fits a
+  // spread - jumped to SNACKS every time it was added to breakfast, and the
+  // only cure was moving the row by hand afterwards.
+  //
+  // The clock is the fallback for a caller that names no section at all, which
+  // is the create button with nothing pre-chosen.
   function addSnack(date, mealId, quantity, mealType) {
     const plan = planFor(date);
-    const item = itemById(mealId);
     const resolvedMealType =
-      item?.kind === "snack"
-        ? "snack"
-        : (mealType ?? mealTypeFromTime(new Date().toTimeString().slice(0, 5)));
+      mealType ?? mealTypeFromTime(new Date().toTimeString().slice(0, 5));
     plan.snacks.push({
       mealId,
       at: new Date().toISOString(),
@@ -330,6 +334,9 @@ export const useFoodStore = defineStore("food", () => {
   // totals so the stored figure keeps meaning one thing, "what the library said
   // when this was logged". Folding it in would make every tweaked meal look
   // like a changed recipe, and the drift warning would fire on all of them.
+  /** Every nutrient an entry can carry. One list, or the next one drifts. */
+  const MACRO_KEYS = ["protein", "kcal", "carbs", "fat", "fibre"];
+
   function _entryAt(date, kind, index) {
     const plan = dayPlans.value.find((p) => p.date === date);
     if (!plan) return null;
@@ -435,6 +442,65 @@ export const useFoodStore = defineStore("food", () => {
     if (!component || !item) return;
     Object.assign(component, scaleItem(item, quantity));
     _recomputeFromComponents(entry);
+    _persistPlans();
+  }
+
+  /**
+   * How much of a logged entry you actually ate.
+   *
+   * **The gap this closes.** `addSnack` takes a quantity at the moment you log
+   * it and nothing could change it afterwards, so adding one serving and then
+   * wanting two meant deleting the row and adding it again. Ingredients inside a
+   * meal were editable; how much of the meal was not, which is by far the more
+   * common correction.
+   *
+   * **It scales what is stored, and never re-reads the library.** A logged entry
+   * carries a snapshot precisely so that history survives the recipe being
+   * edited; re-snapshotting at the new quantity would quietly rewrite what you
+   * ate today using a recipe you changed last week. So every macro moves by the
+   * ratio and nothing else is consulted.
+   *
+   * Three cases and they are genuinely different:
+   *
+   * - A plain entry: scale the snapshot.
+   * - An entry whose recipe has been frozen onto it (`components`): scale every
+   *   component and recompute the totals as their sum, because for those entries
+   *   the components are the truth and the totals are derived from them. Letting
+   *   the two be scaled independently is how a list stops adding up to its own
+   *   header.
+   * - `extras` are never touched. They sit beside the parent by design: they are
+   *   separate things you added to one meal on one day, not part of the portion,
+   *   and doubling the meal does not double the egg you put on it.
+   */
+  function setEntryQuantity(date, kind, index, quantity) {
+    const entry = _entryAt(date, kind, index);
+    // Zero is a removal, which is its own action and asks first. A missing
+    // previous quantity reads as one serving, which is what an entry logged
+    // before quantities were stored actually was.
+    if (!entry || !(quantity > 0)) return;
+    const from = entry.quantity ?? 1;
+    if (!(from > 0) || from === quantity) return;
+    const ratio = quantity / from;
+
+    if (Array.isArray(entry.components)) {
+      for (const component of entry.components) {
+        for (const key of MACRO_KEYS) {
+          if (component[key] != null) component[key] = component[key] * ratio;
+        }
+        if (component.quantity != null) component.quantity = component.quantity * ratio;
+      }
+      entry.quantity = quantity;
+      _recomputeFromComponents(entry);
+      _persistPlans();
+      return;
+    }
+
+    for (const key of MACRO_KEYS) {
+      // A macro nobody recorded stays unrecorded. Scaling a null into a zero
+      // would turn "we do not know the fibre" into "this had none".
+      if (entry[key] != null) entry[key] = Math.round(entry[key] * ratio);
+    }
+    entry.quantity = quantity;
     _persistPlans();
   }
 
@@ -648,6 +714,7 @@ export const useFoodStore = defineStore("food", () => {
     addExtra,
     removeExtra,
     setComponentQuantity,
+    setEntryQuantity,
     removeComponent,
     addLibraryItem,
     removeLibraryItem,

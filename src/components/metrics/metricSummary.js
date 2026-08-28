@@ -15,6 +15,32 @@ export function isGoalMetric(def) {
 }
 
 /**
+ * Whether a goal bar can say anything this metric has not already said.
+ *
+ * **A mark is drawn when it adds something the figure did not.** For a metric
+ * whose every reading is either nothing or exactly the target, a bar has two
+ * states, empty and full, and the hero above it already said which one you are
+ * in. Measured on the real archive: 24 logged creatine days, every one of them
+ * 5 g or 0 - so the page was printing the same 5 g three times, in the hero, on
+ * the bar's tick and in the GOAL pair, and the bar was the copy that carried
+ * least.
+ *
+ * **A rule, not a special case for creatine.** Somebody who splits a dose logs
+ * 2.5 g, that lands strictly between nothing and the target, and their bar comes
+ * back on its own with no setting to find. The same holds for any metric that
+ * turns out to be taken-or-not in practice.
+ *
+ * Days with no reading are not evidence either way and are ignored; a metric
+ * with no goal, or with no readings at all, is not binary.
+ */
+export function isBinaryAgainstGoal(values, goal) {
+  if (!goal) return false;
+  const recorded = (values ?? []).filter((v) => v != null);
+  if (!recorded.length) return false;
+  return recorded.every((v) => v === 0 || v === goal);
+}
+
+/**
  * How the target went: how often it was met, the run, and the average.
  *
  * `values` is oldest-first with nulls for days that have none. A day with no

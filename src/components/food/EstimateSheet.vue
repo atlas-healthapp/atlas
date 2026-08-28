@@ -234,13 +234,13 @@ function save() {
   border: 1px solid color-mix(in srgb, var(--fam-intake) 30%, transparent);
   border-radius: 7px;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: 1px;
 }
 .field::placeholder {
   color: var(--dim);
   letter-spacing: 1.4px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .field:focus {
   outline: none;
@@ -265,7 +265,7 @@ function save() {
 .macro .k {
   width: 58px;
   flex: none;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.4px;
 }
 .macro .num {
@@ -278,7 +278,7 @@ function save() {
 .macro .u {
   width: 34px;
   flex: none;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -302,7 +302,7 @@ function save() {
   border-radius: 6px;
   background: none;
   color: var(--dim);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1px;
   cursor: pointer;
 }
@@ -319,7 +319,7 @@ function save() {
   border-radius: 7px;
   background: var(--fam-intake);
   color: var(--bg1);
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 2px;
   cursor: pointer;
 }

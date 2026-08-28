@@ -12,6 +12,53 @@
 import { mergeWorkouts } from "@/components/activity/mergeSessions";
 import { applySplits } from "@/components/activity/splitSessions";
 import { findOverlaps, suppressedStarts } from "@/components/activity/sessionOverlap";
+import { metForTypeName, metFractions } from "@/utils/activityMet";
+
+/**
+ * How short a band-detected session may be before it is treated as noise.
+ *
+ * **The band's detection sensitivity is a dial and turning it up produces
+ * these.** Measured on the real archive on 2026-08-27, after the sensitivity was
+ * moved to Medium: 33 workouts, of which two ran 3 and 4 minutes, both auto
+ * detected, both within a day of the change. The next shortest are 6 and 9
+ * minutes and both look like real short walks, which is what puts the line at
+ * five rather than at ten.
+ *
+ * **Hidden, never deleted.** The record stays in IndexedDB, so this is one
+ * constant away from being reversed and nothing about the archive is lost. Same
+ * reasoning as every other suppression in this file.
+ */
+export const MIN_AUTO_SESSION_SECONDS = 5 * 60;
+
+/**
+ * Whether a record is the band guessing rather than something you did.
+ *
+ * Three things protect a session from this, and each is the user having said
+ * something about it: a session Atlas or you created is never the band guessing;
+ * a record you have named, noted or corrected is one you clearly want; and a
+ * record with no duration at all is not evidence of being short.
+ */
+function isDetectionNoise(record, annotation) {
+  if (!record || record.manual) return false;
+  if (record.typeAutoDetected === false) return false;
+  const seconds = record.activeSeconds;
+  if (!Number.isFinite(seconds) || seconds <= 0) return false;
+  if (seconds >= MIN_AUTO_SESSION_SECONDS) return false;
+  // Field names taken from the store rather than guessed: `setType` writes
+  // `typeId`, `setNote` writes `note`, and `setDuration` writes
+  // `activeSecondsOverride`. A `startOverride` counts too - moving a
+  // session's start is not something anybody does to a record they want gone.
+  if (
+    annotation &&
+    (annotation.typeId ||
+      (annotation.note ?? "").trim() ||
+      annotation.activeSecondsOverride != null ||
+      annotation.startOverride != null)
+  ) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * `store` is the sessions store, passed rather than imported so this stays a
@@ -50,6 +97,10 @@ export function resolveSessions(rawSessions, store) {
     // A member of a merge is not a session of its own. It reappears inside its
     // owner rather than beside it.
     if (annotation?.mergedInto != null) continue;
+    // A three-minute record the band decided was a workout. Dropped here rather
+    // than per screen, so the list, the week chart, the month totals and
+    // Recovery's day markers all stop counting it together.
+    if (isDetectionNoise(record, annotation)) continue;
 
     const memberStarts = store.membersOf(record.startMillis);
     if (!memberStarts.length) {
@@ -113,7 +164,7 @@ function expand(session, recordStart, store) {
 
   const stats = store.splitStatsFor?.(recordStart) ?? {};
 
-  return applySplits(session, cuts).map((part) => {
+  const resolved = applySplits(session, cuts).map((part) => {
     // The heart rate measured for this part when the cut was made. Absent for a
     // cut stored before this existed, and then the band's own figures stand.
     const measured = stats[part.startMillis];
@@ -132,4 +183,47 @@ function expand(session, recordStart, store) {
     // one half is applied to that half alone.
     return store.resolve(withStats);
   });
+
+  return redistributeCalories(resolved, store);
+}
+
+/**
+ * Divide a cut record's calories by what each part actually was.
+ *
+ * **`applySplits` shares them by time, which is wrong when the halves were
+ * different activities** - the case the splitter was built for is a climb
+ * followed by the walk home, and by the clock the walk takes far more than it
+ * earned. This runs after the parts have been typed, because the types are
+ * annotations filed under each part's own start and are not reachable inside the
+ * split itself.
+ *
+ * **It redistributes, it never invents.** The total is whatever the parts
+ * already sum to, which is the band's own measurement, and only its division
+ * changes. Any part missing a MET, or every part sharing one, and this stands
+ * down and the time share stays - which is the right answer for a boulder day,
+ * where hiking at 6.0 against climbing at 5.8 is near enough the same per
+ * minute.
+ */
+function redistributeCalories(parts, store) {
+  if (!parts || parts.length < 2) return parts;
+
+  const rows = parts.map((part) => ({
+    seconds: part.activeSeconds,
+    met: metForTypeName(store.typeNameFor?.(part) ?? null),
+  }));
+
+  const fractions = metFractions(rows);
+  if (!fractions) return parts;
+
+  const total = parts.reduce((sum, p) => sum + (p.caloriesKcal ?? 0), 0);
+  if (!(total > 0)) return parts;
+
+  return parts.map((part, i) => ({
+    ...part,
+    caloriesKcal: Math.round(total * fractions[i]),
+    // Said out loud, because it is no longer a share of the clock and a reader
+    // comparing two parts of one record deserves to know why the shorter one
+    // carries more.
+    caloriesByActivity: true,
+  }));
 }

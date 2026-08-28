@@ -87,12 +87,23 @@
      Set for the platform sans. They were first tuned against Rajdhani, which
      ran 11% narrow, so if the body face ever changes again these want
      re-checking rather than carrying over. */
-  --fs-value: 18px;
-  --fs-label: 12.5px;
-  --fs-cardhd: 13px;
-  --fs-prose: 16.5px;
-  --fs-second: 14.5px;
-  --fs-micro: 11px;
+  /* **Raised on 2026-08-27 against the device rather than against the page.**
+     Android's font scale is 0.85 on the author's phone and the WebView applies
+     it to explicit px sizes too, so a rule saying 10px computes to 8.5px -
+     measured, not assumed. The scale below was set nominally and never checked
+     against that: 145 declarations across the app rendered under 10px and 58 of
+     them under 8.5px, which is why the label layer read as cramped rather than
+     as quiet. Every size here now clears 11px on the device. The floor is 13px,
+     which is the same reasoning as the settings pass of 25 August (nine sizes to
+     four, 12px floor on --set-* tokens); this is that pass applied to the rest
+     of the app. If the type ever looks large on a desktop browser, that is the
+     0.85 not being applied there and is not a reason to put it back. */
+  --fs-value: 19px;
+  --fs-label: 14px;
+  --fs-cardhd: 14.5px;
+  --fs-prose: 17.5px;
+  --fs-second: 15.5px;
+  --fs-micro: 13.5px;
   /* Bigger type in the same box is just cramped type. */
   --row-h: 56px;
   --row-label-w: 94px;
@@ -478,6 +489,48 @@ button {
  *
  * `position: relative` stays. The brackets are gone but absolutely positioned
  * children inside panels are not. */
+/* Every drill-through's shell. **Global, and that is the whole point.**
+ *
+ * This was copy-pasted into seven components, byte for byte in six of them.
+ * Omitting it renders a page in normal flow underneath the tab it opened from -
+ * which builds clean, passes every test, and was found only by reading the live
+ * DOM after the navigation looked broken. `PageHeader` was extracted for exactly
+ * this reason and the shell should have gone with it.
+ *
+ * A page that wants a different surface overrides `background` in its own scoped
+ * block; SettingsPage does, so that moving there does not read as a different
+ * surface from the app behind it. */
+.page {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg1);
+  color: var(--body);
+  font-family: var(--font-sans);
+  /* Safe-area padding on the shell, never on the scrolling child: on the child
+     the inset scrolls away with the content and the header rides up under the
+     status icons. */
+  padding: calc(12px + env(safe-area-inset-top)) 18px
+    calc(20px + env(safe-area-inset-bottom));
+  overflow: hidden;
+  animation: pagein 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pagein {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page {
+    animation: none;
+  }
+}
+
 .panel {
   background: var(--panel);
   border-radius: 10px;
@@ -490,7 +543,7 @@ button {
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 3px;
   color: var(--acc);
   margin-bottom: 7px;
@@ -522,7 +575,7 @@ button {
   /* A wide gap above and a normal one below: the space is what says the page
      has changed subject, and today's half is what it should be spent on. */
   margin: 34px 0 0;
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 3px;
 }
 .grouphd::after {
@@ -541,7 +594,7 @@ button {
  * header itself was extracted to fix. Sized with .back and .context. */
 .datetext {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14.5px;
   letter-spacing: 1.8px;
   color: var(--dim);
   min-width: 86px;

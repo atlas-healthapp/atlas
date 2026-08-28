@@ -581,7 +581,14 @@ export function paIndexFrom(
       : (minutes[mid - 1] + minutes[mid]) / 2;
 
   const hrMax = predictedHrMax(age);
-  const hrOf = (s) => (num(s.hrAvg) ? s.hrAvg : null);
+  // **`hrWorking` first, and it is not the same quantity as `hrAvg`.** The
+  // scale below is ACSM's, which classifies the effort *while exercising*, and a
+  // session mean averages the climbing in with the belaying. `sessionIntensity.js`
+  // computes the working figure from the stored samples; `fitnessAgeModel.js`
+  // attaches it, because reading them belongs next to the stores. A session past
+  // the 90-day downsample has no spread left to take a percentile of and falls
+  // back here, which is the old estimator and is counted by the caller.
+  const hrOf = (s) => (num(s.hrWorking) ? s.hrWorking : num(s.hrAvg) ? s.hrAvg : null);
   const withHr = list.filter((s) => hrOf(s) > 0);
   // Weighted by how long each session lasted: an hour at threshold describes the
   // habit more than a ten-minute walk does, and an unweighted mean lets the
@@ -630,6 +637,10 @@ export function paIndexFrom(
     medianMinutes,
     intensityShare,
     sessions: list.length,
+    // How many of the scored sessions had a working figure from real samples
+    // rather than falling back to the band's average. A window made mostly of
+    // fallbacks is scored on the old, low estimator and the page can say so.
+    measuredSessions: withHr.filter((s) => num(s.hrWorking)).length,
     days,
   };
 }

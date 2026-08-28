@@ -1,6 +1,12 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { registerPlugin } from "@capacitor/core";
+import {
+  migrateSingle,
+  nextDue,
+  serialisePlan,
+  slotOf,
+} from "@/utils/alarmPlan";
 import { Preferences } from "@capacitor/preferences";
 import { load, persist } from "@/utils/storage";
 import { useCheckinStore } from "@/stores/checkin";
@@ -15,8 +21,10 @@ import {
 } from "@/sources/helioBleSource";
 import { ingestSamples, commitSleepSessions, commitWorkouts } from "@/utils/sampleIngest";
 import { clearWorkouts, newestWorkoutStart, purgeImplausible } from "@/utils/sampleDb";
+import { publishWorkoutFloor } from "@/utils/nativeSummary";
 import { backfillRollupKeys, rescopeRestingHrToNights } from "@/utils/dailyRollup";
 import { repeatMask } from "@/utils/strapAlarm";
+import { progressLabel } from "@/utils/syncProgress";
 
 // Direct BLE link to the Helio Strap, with no Gadgetbridge and no Zepp in the
 // path. The mirror image of stores/gadgetbridge.js: same job, same downstream
@@ -28,8 +36,28 @@ import { repeatMask } from "@/utils/strapAlarm";
 
 const HelioBle = registerPlugin("HelioBle");
 
+/**
+ * What the app calls the phase that files the background service's collection
+ * into the archive.
+ *
+ * **Shared, because three places say it and two of them are fallbacks.** Home's
+ * sync line and `AppHeader` both render `syncPhase || <this>` while `draining`
+ * is true, so a word changed in one place and not the others would show a
+ * different name depending on which tab you opened.
+ *
+ * It names the night rather than the mechanism: nobody has a word for the native
+ * cache, and everybody knows what last night is. The honest limit is that the
+ * service also collects during the day, so a first open at three in the
+ * afternoon files a few hours and still calls them overnight. Accepted - the
+ * case this phase is long enough to read is the morning one, and every other
+ * time it is gone before it can be misread.
+ */
+export const DRAIN_PHASE = "READING OVERNIGHT";
+
 const AUTH_KEY_KEY = "atlas_helio_authkey";
 const CONNECTED_KEY = "atlas_helio_connected";
+/** Whether the band last refused the key Atlas holds. See `authRejected`. */
+const AUTH_REJECTED_KEY = "atlas_helio_auth_rejected";
 // Persisted so the panel can say something true the moment it opens, rather
 // than reading "never synced" until the first sync of the session finishes.
 const LAST_SYNC_KEY = "atlas_helio_last_sync";
@@ -70,14 +98,15 @@ const BATTERY_KEY = "atlas_helio_battery";
 // is holding: nothing here can read its slots back, and they are shared with
 // Zepp, so anything set outside Atlas is invisible to this.
 const ALARM_KEY = "atlas_helio_alarm";
-/**
- * The single slot Atlas writes.
- *
- * One rather than a list, because a list of slots would be a UI asserting state
- * it cannot verify. When the read side exists this becomes a real set; until
- * then, one slot is the most that can be shown honestly.
+/** The list that replaced it, 2026-08-24. The old key is read once, to migrate. */
+const ALARMS_KEY = "atlas_helio_alarms";
+/*
+ * The single-slot note that used to sit here is gone (2026-08-24). It said a
+ * list of slots would be a UI asserting state it cannot verify - true while
+ * slot 1 was only a protocol field. It was then proven on the device: the write
+ * was accepted, the strap buzzed for it, and Zepp listed both alarms. So the
+ * slot is now the alarm's position in the list. See utils/alarmPlan.js.
  */
-const ALARM_SLOT = 0;
 /**
  * Long, because this is a cold BLE connect: finding the band, the handshake and
  * the reply, with the band possibly asleep at the far end. The sync watchdog is
@@ -150,7 +179,13 @@ const SAMPLE_PURGE_KEY = "atlas_sample_purge_2026_08_19";
 // than only the dates that still carry a nap, because the band revises a record
 // and drops one. A routine sync reaches today; this reaches the fortnight the
 // NAPS card draws, where a stale nap would otherwise sit until it aged out.
-const DEEP_FETCH_VERSION = 9;
+// 10 on 2026-08-28, and the first bump that is not about sleep. A deep fetch now
+// asks for workouts from the start of its window instead of from the newest one
+// already stored, so this bump is the migration: every install walks the last
+// month of sessions once and picks up anything the forward-only cursor had left
+// behind it. Raised by a user whose walk was in Zepp and never in Atlas - which
+// turned out to be a different cause, but the hole is real either way.
+const DEEP_FETCH_VERSION = 10;
 const DEEP_FETCH_KEY = "atlas_helio_deep_fetch_version";
 /** How deep that fetch goes. Whatever the band still holds inside it, which
  *  measured as 13 nights of sleep sessions on 2026-08-04, not 30. */
@@ -177,6 +212,35 @@ export const useHelioStore = defineStore("helio", () => {
   const lastSyncAt = ref(load(LAST_SYNC_KEY, null));
   const battery = ref(load(BATTERY_KEY, null));
   const lastSyncError = ref(null);
+  /**
+   * The band refused the key Atlas holds.
+   *
+   * **A different kind of failure from every other one here, and the only one
+   * the user has to act on.** Everything else - out of range, link busy because
+   * the Zepp app has the band, a close mid-sync - fixes itself on the next run.
+   * This does not: it means the strap was paired somewhere else, which happens
+   * when somebody logs out of Zepp and lets it re-bind the band, and Atlas will
+   * fail every connect from then on until it is paired again. Told apart at the
+   * protocol level (HelioBlePlugin emits `authFailed`) but treated as a generic
+   * error everywhere above it, so it reached the user as an unexplained failure.
+   *
+   * Persisted, because the thing it describes survives a restart and the panel
+   * that has to say so is often opened cold, hours later.
+   */
+  const authRejected = ref(load(AUTH_REJECTED_KEY, false));
+
+  /** Cleared by the band accepting the key, which is the only real proof. */
+  function markAuthAccepted() {
+    if (!authRejected.value) return;
+    authRejected.value = false;
+    persist(AUTH_REJECTED_KEY, false);
+  }
+
+  function markAuthRejected() {
+    if (authRejected.value) return;
+    authRejected.value = true;
+    persist(AUTH_REJECTED_KEY, true);
+  }
   // Per-metric counts from the last run. Kept because "the sync worked" and
   // "the sync got everything" are different claims, and only this distinguishes
   // a metric the band has no data for from one being parsed wrongly into zero.
@@ -187,7 +251,24 @@ export const useHelioStore = defineStore("helio", () => {
   const syncPhase = ref(null);
   const liveHeartRate = ref(null);
   const liveWatchers = ref(0);
-  const alarm = ref(load(ALARM_KEY, null));
+  /**
+   * Every alarm, in slot order.
+   *
+   * The list index IS the band slot, which is why nothing ever reorders it:
+   * a slot is a physical thing on the band and shuffling would write over an
+   * alarm the user never touched. Migrated once from the single alarm that
+   * came before it; see `migrateSingle`.
+   */
+  const alarms = ref(load(ALARMS_KEY, null) ?? migrateSingle(load(ALARM_KEY, null)));
+  /**
+   * The alarm that will actually ring next, or the first one when none will.
+   *
+   * Kept because a good deal of the app asks "what is the alarm" and means
+   * this. It is derived rather than stored, so it cannot drift from the list.
+   */
+  const alarm = computed(
+    () => nextDue(alarms.value)?.alarm ?? alarms.value[0] ?? null
+  );
   const alarmSending = ref(false);
   // "Streaming was asked for" is not the same as "a reading has arrived". The UI
   // needs the first to show a placeholder, or a slow first reading looks
@@ -242,6 +323,13 @@ export const useHelioStore = defineStore("helio", () => {
       `ERROR ${lastSyncError.value ?? "none"}`,
       "",
       ...logLines.value,
+      "",
+      // The decisions, under the exchange. The log says what went over the
+      // radio; the trail says why a sync ran or declined at all, and the two
+      // questions a report gets asked are "what did it send" and "why did
+      // nothing happen". Neither can answer the other.
+      "SYNC TRAIL",
+      ...syncTrail(),
     ].join("\n");
   }
 
@@ -362,6 +450,96 @@ export const useHelioStore = defineStore("helio", () => {
     }
   }
 
+  /**
+   * Every morning the alarm has a record for, plus what is set right now.
+   *
+   * Returns `null` rather than an empty shape when the plugin is not there, so
+   * a caller can tell "no build support" from "nothing has happened yet" - the
+   * difference between a screen that should apologise and one that should say
+   * the alarm has not run since it was set.
+   */
+  async function alarmHistory() {
+    try {
+      const res = await HelioBle.alarmHistory();
+      return {
+        mornings: res?.mornings ?? [],
+        bandOffsetMinutes: Number(res?.bandOffsetMinutes ?? null),
+        detectionSensitivity: Number(res?.detectionSensitivity ?? -1),
+        detectionAlert: Number(res?.detectionAlert ?? -1),
+        phoneOffsetMinutes: Number(res?.phoneOffsetMinutes ?? null),
+        mode: res?.mode ?? "fixed",
+        enabled: !!res?.enabled,
+        hour: Number(res?.hour ?? -1),
+        minute: Number(res?.minute ?? 0),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /** True while a band settings write is in flight, for the panel's label. */
+  const configSending = ref(false);
+
+  /**
+   * Set the strap's workout detection sensitivity (0 HIGH, 1 STANDARD, 2 LOW).
+   *
+   * **Waits for the strap, exactly as `writeAlarm` does.** The first version
+   * queued this for the next sync, and the send only ran from the background
+   * service's own listener - so a sync started by the app read the setting and
+   * never acted on the queue, and the change sat on PENDING for good. A setting
+   * somebody just pressed is something they are watching, so it gets its own
+   * connect and its own answer.
+   *
+   * Resolves only once the band has accepted. A refusal, a dropped link or a
+   * silence all reject, because a settings screen that says "saved" without the
+   * band agreeing is the failure this whole read-first design exists to avoid.
+   */
+  function setDetectionSensitivity(level) {
+    if (configSending.value) return Promise.resolve(null);
+    if (!authKey.value) return Promise.reject(new Error("no auth key set"));
+    if (liveActive.value) {
+      return Promise.reject(new Error("heart rate is streaming"));
+    }
+    configSending.value = true;
+
+    return new Promise((resolve, reject) => {
+      let listener = null;
+      let watchdog = null;
+      let settled = false;
+
+      const finish = async (error) => {
+        if (settled) return;
+        settled = true;
+        if (watchdog) clearTimeout(watchdog);
+        if (listener) await listener.remove();
+        configSending.value = false;
+        if (error) reject(error);
+        else resolve(level);
+      };
+
+      // Registered before the write is asked for: the reply arrives as an event
+      // and a listener attached afterwards can miss it.
+      HelioBle.addListener("bleLog", (event) => {
+        if (event?.event === "bandConfigSet") {
+          finish(event.accepted ? null : new Error("the strap refused it"));
+          return;
+        }
+        if (event?.event === "closed" && !settled) {
+          finish(new Error("the strap closed the link before answering"));
+        }
+      })
+        .then((handle) => {
+          listener = handle;
+          watchdog = setTimeout(
+            () => finish(new Error("the strap did not answer")),
+            ALARM_TIMEOUT_MS
+          );
+          return HelioBle.setDetectionSensitivity({ authKey: authKey.value, level });
+        })
+        .catch((e) => finish(e instanceof Error ? e : new Error(String(e))));
+    });
+  }
+
   /** Start a fresh trail. A trail belongs to one session. */
   async function clearSessionHeartTrail() {
     try {
@@ -424,7 +602,52 @@ export const useHelioStore = defineStore("helio", () => {
    * would show 06:00 while the strap still held 08:30, and since nothing here
    * can read the band back, that lie would never be corrected.
    */
+  /**
+   * Take an alarm out of Atlas's list.
+   *
+   * **This cannot clear the band's slot**, because nothing here can write an
+   * "empty" alarm and nothing can read the slots back to check. The strap keeps
+   * whatever was last written there until something overwrites it, which is why
+   * the panel says so before asking. Switching an alarm off and sending is the
+   * way to make it silent; removing is the way to stop Atlas managing it.
+   *
+   * The list is spliced, so every later alarm's slot shifts down by one. That is
+   * correct rather than convenient: the next mirror rewrites the plan, the
+   * service resolves against the new positions, and the next send to each alarm
+   * lands where the list now says. The cost is that the band briefly holds a
+   * stale copy at the old index, which the note above is about.
+   */
+  function removeAlarm(id) {
+    alarms.value = alarms.value.filter((a) => a.id !== id);
+    persist(ALARMS_KEY, alarms.value);
+    HelioBle.setAlarmPlan({
+      plan: serialisePlan(alarms.value),
+      slot: 0,
+      ...flatFieldsOf(alarms.value[0]),
+    }).catch(() => {
+      // A failed mirror costs the early wake, never the alarm itself.
+    });
+  }
+
+  /** The single-alarm fields the service still resolves into. */
+  function flatFieldsOf(a) {
+    if (!a) return { mode: "fixed", hour: -1, minute: 0, enabled: false, days: "" };
+    return {
+      mode: a.mode ?? "fixed",
+      hour: a.hour,
+      minute: a.minute,
+      enabled: a.enabled,
+      days: (a.days ?? []).join(","),
+      onsetHours: a.onsetHours ?? 8,
+      latestHour: a.latestHour ?? -1,
+      latestMinute: a.latestMinute ?? 0,
+    };
+  }
+
   function writeAlarm({
+    // Which alarm in the list this is. Absent means the first one, which is
+    // what every caller meant back when there was only ever one.
+    id = null,
     hour,
     minute,
     days = [],
@@ -447,6 +670,7 @@ export const useHelioStore = defineStore("helio", () => {
 
     alarmSending.value = true;
     const spec = {
+      id: id ?? alarms.value[0]?.id ?? "alarm-1",
       hour,
       minute,
       days: [...days],
@@ -469,6 +693,10 @@ export const useHelioStore = defineStore("helio", () => {
     // the app was reinstalled, or BLE will not connect, the strap still goes off
     // no later than the time on its face. The worst a broken smart window can do
     // is nothing.
+    // Where on the band this one lives. An alarm being added for the first time
+    // is not in the list yet, so it claims the next free slot - which is the
+    // end of the list, because nothing ever reorders it.
+    const writeSlot = slotOf(alarms.value, spec.id) ?? alarms.value.length;
     const hardHour = mode === "onset" && latestHour != null ? latestHour : hour;
     const hardMinute = mode === "onset" && latestMinute != null ? latestMinute : minute;
 
@@ -487,12 +715,23 @@ export const useHelioStore = defineStore("helio", () => {
           reject(error);
           return;
         }
-        alarm.value = spec;
-        persist(ALARM_KEY, spec);
+        // Into the list at its own position, or appended when it is new.
+        // Never reordered: the index is the band slot.
+        const at = alarms.value.findIndex((a) => a.id === spec.id);
+        alarms.value =
+          at < 0
+            ? [...alarms.value, spec]
+            : alarms.value.map((a) => (a.id === spec.id ? spec : a));
+        persist(ALARMS_KEY, alarms.value);
         // Mirror it where the background service can read it. Only after the
         // band has accepted the write, so the service can never be watching a
         // window for an alarm the strap does not hold.
         HelioBle.setAlarmPlan({
+          // The whole list, which the service resolves into the flat fields
+          // below on every tick. Serialised AFTER the list was updated above,
+          // so the alarm just accepted is the one mirrored.
+          plan: serialisePlan(alarms.value),
+          slot: slotOf(alarms.value, spec.id) ?? 0,
           mode,
           hour,
           minute,
@@ -534,7 +773,10 @@ export const useHelioStore = defineStore("helio", () => {
           );
           return HelioBle.setAlarm({
             authKey: authKey.value,
-            slot: ALARM_SLOT,
+            // This alarm's own slot, not a constant. Slot 1 was proven on the
+            // device (accepted, buzzed, and Zepp showed both), which is what
+            // made more than one alarm possible at all.
+            slot: writeSlot,
             hour: hardHour,
             minute: hardMinute,
             enabled,
@@ -641,7 +883,7 @@ export const useHelioStore = defineStore("helio", () => {
           // minute is indistinguishable from a hang.
           syncPhase.value = `SAVING · ${samples.length} READINGS`;
           const touched = await ingestSamples(samples, SOURCE_ID, (done, total) => {
-            syncPhase.value = `SAVING · ${done} OF ${total}`;
+            syncPhase.value = progressLabel("SAVING", done, total);
           });
           syncPhase.value = "SAVING SESSIONS";
           const workoutDates = await commitWorkouts(workouts);
@@ -683,6 +925,11 @@ export const useHelioStore = defineStore("helio", () => {
           collectedWorkouts.push(...(event.workouts ?? []));
           syncPhase.value = `READING SESSIONS · ${collectedWorkouts.length}`;
         } else if (event.event === "fetchComplete") {
+          // Reaching a completed fetch means the band accepted the key, which is
+          // the only real proof there is. Cleared here rather than on connect,
+          // because a connect that goes on to fail auth is not evidence of
+          // anything.
+          markAuthAccepted();
           syncPhase.value = "SAVING";
           finish(null);
         } else if (event.event === "battery") {
@@ -703,6 +950,7 @@ export const useHelioStore = defineStore("helio", () => {
             }
           }
         } else if (event.event === "authFailed") {
+          markAuthRejected();
           finish(new Error(event.message || "authentication failed"));
         } else if (event.event === "closed" && !settled) {
           // A close before fetchComplete means the band went away mid-sync.
@@ -726,11 +974,32 @@ export const useHelioStore = defineStore("helio", () => {
           // three-day window keeps landing on one already in the archive and
           // never reaches the newest. Sent as a string because a millisecond
           // timestamp does not survive the bridge's int.
+          //
+          // **Except on a deep fetch, where it starts from nothing.** That
+          // cursor only ever moves forward, so a workout the band exposes AFTER
+          // a later one is already stored can never be asked for again - it is
+          // behind the watermark for good. Zepp contention is what sets that up:
+          // the band takes one central at a time, so anybody sitting in that app
+          // locks Atlas out, and the session can surface late.
+          //
+          // Sending 0 makes the round fall back to `sinceDays`, which a deep
+          // fetch has already widened to DEEP_FETCH_DAYS, so the walk starts a
+          // month back and picks up anything skipped. Safe because `putWorkouts`
+          // upserts on `startMillis`: re-fetching a stored session overwrites it
+          // with itself and cannot duplicate. The cost is one slower sync per
+          // DEEP_FETCH_VERSION bump, which is also the migration - bumping it is
+          // what makes every existing install do this repair once.
+          //
+          // It cannot recover anything older than the deep window. That is
+          // accepted: the case this exists for is a session that arrived late,
+          // not one lost a year ago.
           let workoutSinceMillis = "0";
-          try {
-            workoutSinceMillis = String(await newestWorkoutStart());
-          } catch {
-            // No cursor is a slower sync, not a broken one. Fall through.
+          if (!deepOwed) {
+            try {
+              workoutSinceMillis = String(await newestWorkoutStart());
+            } catch {
+              // No cursor is a slower sync, not a broken one. Fall through.
+            }
           }
           return HelioBle.connect({
             authKey: authKey.value,
@@ -815,11 +1084,19 @@ export const useHelioStore = defineStore("helio", () => {
       // said updating for so long whilst not saying it was doing anything".
       // `ingestSamples` already takes this callback and the sync path already
       // passes one; this path simply never did.
-      syncPhase.value = `UPDATING · ${samples.length} READINGS`;
+      // **It says what it is doing, and it is not the strap.** `UPDATING` was
+      // the one word covering a phase that runs BEFORE anything is connected:
+      // this is the background service's night being written into the archive,
+      // work already fetched and paid for. So the percentage ran to 100 and then
+      // the header said WAKING THE STRAP, which reads as starting over -
+      // reported as exactly that. Naming the phase is what separates the two,
+      // and it also explains why the step only appears on the first open of the
+      // day: by the second there is no night to file.
+      syncPhase.value = `${DRAIN_PHASE} · ${samples.length} READINGS`;
       touched = await ingestSamples(samples, SOURCE_ID, (done, total) => {
-        syncPhase.value = `UPDATING · ${done} OF ${total}`;
+        syncPhase.value = progressLabel(DRAIN_PHASE, done, total);
       });
-      syncPhase.value = "UPDATING · SESSIONS";
+      syncPhase.value = `${DRAIN_PHASE} · SESSIONS`;
       workoutDates = await commitWorkouts(normaliseWorkouts(rawWorkouts));
     } finally {
       syncPhase.value = null;
@@ -974,6 +1251,37 @@ export const useHelioStore = defineStore("helio", () => {
    * starting.
    */
   async function startup() {
+    // **Seed the service's announce floor from what is already stored.**
+    // `commitWorkouts` publishes it whenever a sync brings workouts in, which
+    // leaves two holes: a session collected before this shipped, and a restore
+    // onto a phone whose service has never announced anything. Both end with the
+    // service announcing a session the user has been looking at for hours -
+    // observed on 2026-08-27 doing exactly that. Reading the archive on launch
+    // costs one indexed lookup and closes both.
+    newestWorkoutStart()
+      .then((t) => (t > 0 ? publishWorkoutFloor(t) : null))
+      .catch(() => null);
+
+    // **The migration is written down the first time it is read.** It runs in
+    // the ref initialiser above, which produces the right list in memory but
+    // persists nothing, so it re-ran on every launch and the service never
+    // learned there was a plan at all. Storing it once settles both.
+    if (alarms.value.length && load(ALARMS_KEY, null) == null) {
+      persist(ALARMS_KEY, alarms.value);
+    }
+    // Mirror the plan even when nothing has been edited, so the service can
+    // resolve which alarm tonight belongs to on a phone whose owner has not
+    // touched the panel since updating. Harmless when it is already current.
+    if (alarms.value.length) {
+      HelioBle.setAlarmPlan({
+        plan: serialisePlan(alarms.value),
+        slot: 0,
+        ...flatFieldsOf(alarm.value),
+      }).catch(() => {
+        // No plugin, or an older build. The flat keys are still whatever the
+        // last real write left, which is the pre-list behaviour.
+      });
+    }
     // Before the strap check: this repairs stored data and owes nothing to a
     // band being connected.
     await backfillHeartRateRollups();
@@ -1031,6 +1339,23 @@ export const useHelioStore = defineStore("helio", () => {
     } catch {
       // A diagnostic must never be the thing that breaks a sync.
     }
+  }
+
+  /**
+   * The trail, newest last, for anything that wants to show it.
+   *
+   * Read from storage rather than held in a ref: the lines are written by
+   * `noteRefresh` and by nothing else, they are read when somebody opens a
+   * panel, and a reactive mirror of a 60-line append-only log would be a second
+   * copy that could disagree with the file.
+   *
+   * **It existed for three weeks before anything could show it.** Written on
+   * every refresh since 2026-08-14 and readable only over adb, which means only
+   * the author could read it - and the ticket it was built for is about a
+   * morning on somebody's phone.
+   */
+  function syncTrail() {
+    return load(SYNC_TRAIL_KEY, []) ?? [];
   }
 
   /**
@@ -1251,6 +1576,7 @@ export const useHelioStore = defineStore("helio", () => {
   return {
     connected,
     authKey,
+    authRejected,
     syncing,
     refresh,
     lastSyncAt,
@@ -1263,9 +1589,12 @@ export const useHelioStore = defineStore("helio", () => {
     busy,
     logLines,
     diagnosticReport,
+    syncTrail,
     liveHeartRate,
     liveActive,
     alarm,
+    alarms,
+    removeAlarm,
     alarmSending,
     writeAlarm,
     exactAlarm,
@@ -1273,6 +1602,9 @@ export const useHelioStore = defineStore("helio", () => {
     requestExactAlarm,
     liveHeartRateReading,
     sessionHeartTrail,
+    alarmHistory,
+    setDetectionSensitivity,
+    configSending,
     clearSessionHeartTrail,
     listBondedDevices,
     setStrapAddress,

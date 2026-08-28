@@ -217,3 +217,136 @@ describe("resolveSessions with splits", () => {
     expect(resolveSessions([RECORD], bare)).toHaveLength(1);
   });
 });
+
+/**
+ * The band's own detection, turned up.
+ *
+ * Measured on the real archive 2026-08-27, a day after the strap's detection
+ * sensitivity moved to Medium: 33 workouts, of which two ran 3 and 4 minutes and
+ * both were auto detected. The next shortest are 6 and 9 minutes and both look
+ * like real short walks, which is what puts the line at five rather than ten.
+ */
+describe("detection noise", () => {
+  const short = (over = {}) => ({
+    startMillis: START,
+    endMillis: START + 180000,
+    activeSeconds: 180,
+    typeAutoDetected: true,
+    ...over,
+  });
+
+  it("drops a three-minute record the band detected on its own", () => {
+    expect(resolveSessions([short()], fakeStore())).toHaveLength(0);
+  });
+
+  it("keeps one that reaches the floor", () => {
+    const ok = short({ activeSeconds: 5 * 60 });
+    expect(resolveSessions([ok], fakeStore())).toHaveLength(1);
+  });
+
+  it("keeps the six and nine minute ones from the real archive", () => {
+    const six = short({ activeSeconds: 6 * 60 });
+    const nine = short({ startMillis: START + 1, activeSeconds: 9 * 60 });
+    expect(resolveSessions([six, nine], fakeStore())).toHaveLength(2);
+  });
+
+  // Every one of these is the user having said something about the record, and
+  // a record you have spoken about is one you want.
+  it("never drops one you have named, noted, retimed or corrected", () => {
+    const cases = [
+      { typeId: "climb" },
+      { note: "warm up" },
+      { activeSecondsOverride: 200 },
+      { startOverride: START - 60000 },
+    ];
+    for (const annotation of cases) {
+      const store = fakeStore({ annotations: { [START]: annotation } });
+      expect(resolveSessions([short()], store)).toHaveLength(1);
+    }
+  });
+
+  it("ignores an empty note, which is what the store writes for no note", () => {
+    const store = fakeStore({ annotations: { [START]: { note: "   " } } });
+    expect(resolveSessions([short()], store)).toHaveLength(0);
+  });
+
+  // A session you or Atlas created is never the band guessing, however short.
+  it("never drops a manual session", () => {
+    const manual = { startMillis: START, activeSeconds: 120, manual: true };
+    expect(resolveSessions([], fakeStore({ manualSessions: [manual] }))).toHaveLength(1);
+  });
+
+  it("keeps a record the band did not auto-detect", () => {
+    expect(resolveSessions([short({ typeAutoDetected: false })], fakeStore())).toHaveLength(1);
+  });
+
+  // No duration is not evidence of being short.
+  it("keeps one with no duration recorded at all", () => {
+    expect(resolveSessions([short({ activeSeconds: null })], fakeStore())).toHaveLength(1);
+  });
+});
+
+/**
+ * A cut record's calories, divided by what each part actually was.
+ *
+ * applySplits shares them by the clock, which is wrong when the halves were
+ * different activities: the case the splitter was built for is a climb followed
+ * by the walk home, and by time alone the walk takes far more than it earned.
+ */
+describe("calories across a split", () => {
+  const typed = (names) =>
+    fakeStore({
+      splits: { [START]: [CUT] },
+      annotations: Object.fromEntries(
+        Object.entries(names).map(([t, name]) => [t, { typeId: name }])
+      ),
+    });
+
+  /** The store looks a type name up by id; here the id IS the name. */
+  const withTypeNames = (names) => ({
+    ...typed(names),
+    typeNameFor: (w) => names[w.startMillis] ?? null,
+  });
+
+  const RECORD_WITH_KCAL = { ...RECORD, caloriesKcal: 600 };
+
+  it("gives the harder half more than its share of the clock", () => {
+    const store = withTypeNames({ [START]: "Running", [CUT]: "Walking" });
+    const parts = resolveSessions([RECORD_WITH_KCAL], store);
+    expect(parts).toHaveLength(2);
+
+    const first = parts.find((p) => p.startMillis === START);
+    const second = parts.find((p) => p.startMillis === CUT);
+    const firstShare = first.caloriesKcal / (first.caloriesKcal + second.caloriesKcal);
+    const firstTime = first.activeSeconds / (first.activeSeconds + second.activeSeconds);
+    expect(firstShare).toBeGreaterThan(firstTime);
+  });
+
+  // The band measured the whole and only its division changes.
+  it("keeps the total the band measured", () => {
+    const store = withTypeNames({ [START]: "Running", [CUT]: "Walking" });
+    const parts = resolveSessions([RECORD_WITH_KCAL], store);
+    const total = parts.reduce((sum, p) => sum + p.caloriesKcal, 0);
+    expect(Math.abs(total - 600)).toBeLessThanOrEqual(1);
+  });
+
+  // A boulder day: hiking 6.0 against climbing 5.8 is the same per minute, so
+  // the clock is the right divider and nothing should move.
+  it("stands down when the two activities cost the same", () => {
+    const store = withTypeNames({ [START]: "Indoor Climbing", [CUT]: "Hiking" });
+    const parts = resolveSessions([RECORD_WITH_KCAL], store);
+    expect(parts.every((p) => p.caloriesByActivity !== true)).toBe(true);
+  });
+
+  it("stands down when a part has not been typed", () => {
+    const store = withTypeNames({ [START]: "Running" });
+    const parts = resolveSessions([RECORD_WITH_KCAL], store);
+    expect(parts.every((p) => p.caloriesByActivity !== true)).toBe(true);
+  });
+
+  it("stands down for a type Atlas does not recognise", () => {
+    const store = withTypeNames({ [START]: "Running", [CUT]: "Boot and Scoot" });
+    const parts = resolveSessions([RECORD_WITH_KCAL], store);
+    expect(parts.every((p) => p.caloriesByActivity !== true)).toBe(true);
+  });
+});

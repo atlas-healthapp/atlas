@@ -14,7 +14,7 @@
       <!-- Above TODAY, because it is the slowest-moving thing on the page and
            the one the rest of it accumulates into: a recovery score is about
            last night and this is about the last month of them. -->
-      <FitnessAgeCard :result="fitnessAge" />
+      <FitnessAgeCard :result="fitnessAge" @open="openFitnessAge" />
 
       <!-- The two scores lead: they are what the rows underneath explain, and
            both already have pages of their own. This is also what makes BODY
@@ -112,6 +112,15 @@
     <RecoveryPage v-if="recoveryOpen" :result="recovery" from="BODY" @close="recoveryOpen = false" />
     <StressPage v-if="stressOpen" from="BODY" @close="stressOpen = false" />
     <HeartPage v-if="heartOpen" from="BODY" @close="heartOpen = false" />
+    <!-- Only ever opened from a `ready` card, so the page never has to render a
+         withheld result: the card already explains a figure it cannot give. -->
+    <FitnessAgePage
+      v-if="fitnessAgeOpen"
+      :result="fitnessAge"
+      :series="fitnessAgeHistory"
+      from="BODY"
+      @close="fitnessAgeOpen = false"
+    />
   </div>
 </template>
 
@@ -139,8 +148,8 @@ import { recoveryColor, recoveryInk } from "@/utils/recovery";
 import { recoveryFor } from "@/components/home/homeModel";
 import { BODY_CARDS } from "./bodyModel";
 import FitnessAgeCard from "./FitnessAgeCard.vue";
-import { fitnessAgeFor } from "./fitnessAgeModel";
-import { getWorkouts } from "@/utils/sampleDb";
+import { fitnessAgeFor, withWorkingHeartRate, fitnessAgeSeries } from "./fitnessAgeModel";
+import { getWorkouts, getSamples } from "@/utils/sampleDb";
 import { useSessionsStore } from "@/stores/sessions";
 import { resolveSessions } from "@/components/activity/resolveSessions";
 import { rowFor, daysWithData } from "@/utils/metricRow";
@@ -152,6 +161,7 @@ import RecoveryPage from "@/components/home/RecoveryPage.vue";
 import MetricPage from "@/components/metrics/MetricPage.vue";
 import StressPage from "./StressPage.vue";
 import HeartPage from "./HeartPage.vue";
+import FitnessAgePage from "./FitnessAgePage.vue";
 import GoalBar from "@/components/marks/GoalBar.vue";
 import RangeMark from "@/components/marks/RangeMark.vue";
 import TrendSpark from "@/components/marks/TrendSpark.vue";
@@ -178,6 +188,7 @@ const sleepOpen = ref(false);
 const recoveryOpen = ref(false);
 const stressOpen = ref(false);
 const heartOpen = ref(false);
+const fitnessAgeOpen = ref(false);
 
 // Some rows have a page of their own rather than the generic metric page: sleep,
 // stress and heart rate all have a shape through the night or the day that a
@@ -218,6 +229,26 @@ const loaded = ref(false);
 const rawSessions = ref([]);
 const sessionStore = useSessionsStore();
 const sessions = computed(() => resolveSessions(rawSessions.value, sessionStore));
+
+/**
+ * The same sessions with each one's **working** heart rate attached, for the
+ * fitness age alone.
+ *
+ * A second ref rather than a computed, because reading the samples is async and
+ * every other consumer of `sessions` is synchronous. It starts as the plain list
+ * and is replaced once the reads finish, so the card draws on the old estimator
+ * for a moment rather than not at all.
+ */
+const sessionsForAge = ref([]);
+watch(
+  sessions,
+  async (list) => {
+    sessionsForAge.value = list;
+    if (!list.length) return;
+    sessionsForAge.value = await withWorkingHeartRate(list, getSamples);
+  },
+  { immediate: true }
+);
 
 async function loadWindow() {
   const to = today();
@@ -306,10 +337,34 @@ const fitnessAge = computed(() =>
     // the short window only while that one is still loading, which shows a
     // provisional figure for a moment rather than nothing.
     dayWindow: levels.window.length ? levels.window : dayWindow.value,
-    sessions: sessions.value,
+    sessions: sessionsForAge.value,
     todayKey: todayKey.value,
   })
 );
+
+/**
+ * The weekly history the drill-through draws.
+ *
+ * Computed only while the page is open. Every point re-runs the whole model, and
+ * twelve of those on a tab that is not showing them is work nobody asked for.
+ */
+const fitnessAgeHistory = computed(() => {
+  if (!fitnessAgeOpen.value) return [];
+  return fitnessAgeSeries({
+    profile: { age: profile.age, sex: profile.sex || null, heightCm: profile.heightCm ?? null },
+    entries: checkin.entries,
+    dayWindow: levels.window.length ? levels.window : dayWindow.value,
+    sessions: sessionsForAge.value,
+    todayKey: todayKey.value,
+    dob: profile.dob ?? null,
+  });
+});
+
+function openFitnessAge() {
+  // A withheld figure has nothing to explain: the card itself says what is
+  // missing and how long is left, which is more than the page could add.
+  if (fitnessAge.value?.state === "ready") fitnessAgeOpen.value = true;
+}
 
 const recovery = computed(() =>
   recoveryFor({
@@ -324,7 +379,10 @@ const recovery = computed(() =>
 );
 const recoveryMeta = computed(() => {
   if (recovery.value.state === "calibrating") {
-    return `CALIBRATING ${recovery.value.nights}/${recovery.value.needed}`;
+    // "N OF M NIGHTS" rather than CALIBRATING, matching what `NotYet` says
+    // where a whole block fits. CALIBRATING is the app describing its own
+    // arithmetic; the count says what is actually being waited for.
+    return `${recovery.value.nights} OF ${recovery.value.needed} NIGHTS`;
   }
   return recovery.value.state === "ready" ? recovery.value.label : "NO DATA";
 });

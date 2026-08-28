@@ -2,10 +2,57 @@
 // arithmetic, same split as markGeometry.js and historyChart.js.
 
 import { STAGE_ROW, STAGE_ROWS } from "@/utils/sleepStages";
+import { charWidth } from "@/utils/labelWidth";
 
 const MIN_MS = 60 * 1000;
-/** Below this a tick label runs into its neighbour, so the axis thins out. */
-const MIN_TICK_GAP_PX = 44;
+
+/**
+ * The type `.tick` is set in, in `SleepPage.vue`. Pinned by `hypnogram.test.js`
+ * against the component itself, for the reason under `MIN_TICK_GAP`.
+ */
+export const TICK_FONT_PX = 13;
+export const TICK_LETTER_SPACING = 0.5;
+
+/** `23:00`, which is every label this axis draws once bedtime is known. */
+const TICK_LABEL_CHARS = 5;
+
+/**
+ * Characters of clear space wanted between one tick label and the next.
+ *
+ * **Two, counted against a label width that already assumes the worst.**
+ * `charWidth` deliberately sizes for a device font scale of 1.0 while this phone
+ * is set to 0.85, so a label measured here is about 15% wider than the one that
+ * actually renders. Asking for the four characters the axis had when it was
+ * written would apply that margin twice, and it does: at four this night thins
+ * to a three-hour axis, which is three labels under a whole night's sleep.
+ *
+ * Two here comes out as very nearly three characters of real clearance at the
+ * assumed size, and about four on the phone - which is the spacing the axis was
+ * drawn with in the first place.
+ */
+const TICK_CLEAR_CHARS = 2;
+
+/**
+ * Below this a tick label crowds its neighbour, so the axis thins out to a
+ * wider step.
+ *
+ * **Derived rather than remembered, same defect as `dayMarkers`' CHAR_W.** This
+ * was a flat 44, set when a `23:00` label was 24 units wide and four characters
+ * of air stood between each pair. The type scale went up on 2026-08-27 and the
+ * same label became 36 units, so 44 left barely one character between labels and
+ * the hourly axis read as a solid band of digits - reported as cluttered rather
+ * than as broken, which is exactly what a gap shrinking to a fifth of its
+ * intended size looks like.
+ *
+ * Expressing it in characters is what makes it survive the next type change:
+ * the axis thins to a two-hour step because the labels genuinely stopped
+ * fitting, not because 2 was hardcoded.
+ *
+ * Note this is why the expanded hypnogram was fine while the inline one was not.
+ * Both set the label at the same size in user units, and the expanded view draws
+ * a wider `width`, so the same label costs proportionally less of it.
+ */
+const MIN_TICK_GAP = (TICK_LABEL_CHARS + TICK_CLEAR_CHARS) * charWidth(TICK_FONT_PX, TICK_LETTER_SPACING);
 
 function clockLabel(ms) {
   const d = new Date(ms);
@@ -15,7 +62,7 @@ function clockLabel(ms) {
 /** Hours between ticks: the smallest step whose labels still clear each other. */
 function tickStepHours(perMinute) {
   for (const hours of [1, 2, 3, 4]) {
-    if (hours * 60 * perMinute >= MIN_TICK_GAP_PX) return hours;
+    if (hours * 60 * perMinute >= MIN_TICK_GAP) return hours;
   }
   return 4;
 }

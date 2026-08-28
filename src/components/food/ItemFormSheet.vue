@@ -223,6 +223,42 @@
           <div v-if="cycleError" class="scannote dim-text mono">
             {{ cycleError }}
           </div>
+
+          <!-- Inside the form and above SAVE, not after it. The question is
+               part of the edit, and a panel that appears once you have already
+               committed reads as the app second-guessing a decision you made.
+               Two options rather than the scan panel's four: KEEP WHAT I HAD
+               and ADD AS NEW answer "this scan disagrees with the library",
+               which is not the question here - you typed the new figures
+               yourself and CLOSE already discards them. -->
+          <div v-if="needsReachChoice" class="deleteblocked mono">
+            <div>
+              THIS HAS BEEN LOGGED {{ editUses }}
+              {{ editUses === 1 ? "TIME" : "TIMES" }}. DO YOU WANT TO CHANGE
+              PREVIOUS ENTRIES?
+            </div>
+            <div class="dupchoices">
+              <button
+                class="dupbtn mono"
+                :class="{ on: editReach === 'forward' }"
+                type="button"
+                @click="editReach = 'forward'"
+              >
+                <b>USE FROM NOW</b>
+                <span>The recipe changed. Days already logged keep what they were.</span>
+              </button>
+              <button
+                class="dupbtn mono"
+                :class="{ on: editReach === 'backdate' }"
+                type="button"
+                @click="editReach = 'backdate'"
+              >
+                <b>USE AND FIX LOGGED DAYS</b>
+                <span>We had it wrong. Rewrites every day it was logged on.</span>
+              </button>
+            </div>
+          </div>
+
           <div class="scanrow">
             <button
               v-if="!isEdit && !form.composite"
@@ -241,7 +277,7 @@
               "
               @click="save"
             >
-              {{ isEdit ? "SAVE" : "+ ADD" }}
+              {{ isEdit ? editSaveLabel : "+ ADD" }}
             </button>
           </div>
 
@@ -290,6 +326,11 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useFoodStore } from "@/stores/food";
 import BarcodeScanSheet from "./BarcodeScanSheet.vue";
+import {
+  figuresOf,
+  needsReachChoice as needsReachChoiceFor,
+  reachSaveLabel,
+} from "./editReach";
 import MealPickSheet from "./MealPickSheet.vue";
 import { useBackClose } from "@/composables/useBackClose";
 import { formatAmount } from "./rowDetail";
@@ -375,6 +416,47 @@ const duplicateSaveLabel = computed(() => {
   return `SAVE AND FIX ${duplicateUses.value} ${duplicateUses.value === 1 ? "DAY" : "DAYS"}`;
 });
 
+// ── how far a hand edit reaches ────────────────────────────────────────────
+//
+// The forward/backdate choice above belongs to the SCAN path and only ever
+// appeared there. Editing an item by hand - open it, change the protein, SAVE
+// - went straight through updateLibraryItem and said nothing, so every day it
+// had already been logged on silently kept the old figures. That is a
+// defensible default and a terrible secret: the one question worth asking is
+// whether the figures were always wrong or have just changed, and only the
+// person typing knows.
+//
+// What the item said when the sheet opened, so a change can be detected rather
+// than assumed. Captured raw, before any scan overwrites the fields. The gate
+// itself is in editReach.js, tested there.
+const openedWith = ref(null);
+
+/** How many logged days a backdate would rewrite. Zero means no question. */
+const editUses = computed(() =>
+  activeItemId.value ? food.countUsesOfItem(activeItemId.value) : 0
+);
+
+const needsReachChoice = computed(() =>
+  needsReachChoiceFor({
+    isEdit: isEdit.value,
+    scanChoiceOpen: !!duplicateChoice.value,
+    opened: openedWith.value,
+    current: form,
+    uses: editUses.value,
+  })
+);
+
+/** Same default and the same reasoning as the scan path's: forward is safe. */
+const editReach = ref("forward");
+
+const editSaveLabel = computed(() =>
+  reachSaveLabel({
+    asking: needsReachChoice.value,
+    reach: editReach.value,
+    uses: editUses.value,
+  })
+);
+
 /** Put back what was there before the scan overwrote the fields. */
 function keepPrevious() {
   const prev = duplicateChoice.value?.previous;
@@ -410,6 +492,10 @@ onMounted(() => {
     form.portionAmount = item.portion?.amount ?? null;
     form.portionUnit = item.portion?.unit ?? "";
     form.barcode = item.barcode ?? null;
+    // Read off the form rather than off the item, so it is the same shape the
+    // comparison sees: a composite blanks its own macros above, and comparing
+    // against the item's stored nulls would read as a change on every open.
+    openedWith.value = figuresOf(form);
   }
   if (props.prefillName && !props.item) {
     form.name = props.prefillName;
@@ -613,7 +699,15 @@ function save() {
     // Only when it was explicitly asked for. Refreshing snapshots is the one
     // action here that reaches backwards into days already recorded, so it
     // never happens as a side effect of saving.
-    if (duplicateChoice.value && duplicateMode.value === "backdate") {
+    //
+    // Two panels can ask for it - the scan path's and the hand edit's - and
+    // they are mutually exclusive by construction (needsReachChoice stands
+    // down while duplicateChoice is up), so this reads whichever one was
+    // actually on screen.
+    const backdating = duplicateChoice.value
+      ? duplicateMode.value === "backdate"
+      : needsReachChoice.value && editReach.value === "backdate";
+    if (backdating) {
       food.refreshSnapshotsForItem(id);
     }
     const count = food.countUsesOfItem(id);
@@ -681,7 +775,7 @@ function confirmForceDelete() {
 }
 .dupbtn span {
   font-family: var(--font-sans);
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 0;
   line-height: 1.35;
   color: var(--body);
@@ -720,7 +814,7 @@ function confirmForceDelete() {
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 3px;
   color: var(--fam-intake);
   margin-bottom: 14px;
@@ -738,7 +832,7 @@ function confirmForceDelete() {
   flex: 1;
   border: 1px solid color-mix(in srgb, var(--fam-intake) 30%, transparent);
   color: var(--dim);
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   padding: 6px 0;
   font-family: var(--font-mono);
@@ -754,7 +848,7 @@ function confirmForceDelete() {
   color: var(--ink);
   padding: 10px 12px;
   margin-bottom: 8px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .field[type="number"] {
   -moz-appearance: textfield;
@@ -778,14 +872,14 @@ function confirmForceDelete() {
   gap: 3px;
 }
 .fieldlabel {
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.5px;
   color: var(--dim);
 }
 .save {
   width: 100%;
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   color: var(--bg1);
   background: var(--fam-intake);
@@ -802,7 +896,7 @@ function confirmForceDelete() {
   flex: 1;
   border: 1px solid color-mix(in srgb, var(--fam-intake) 45%, transparent);
   color: var(--fam-intake);
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   padding: 10px 0;
 }
@@ -817,20 +911,20 @@ function confirmForceDelete() {
 }
 .macro {
   text-align: right;
-  font-size: 11px;
+  font-size: 13.5px;
   color: var(--dim);
   white-space: nowrap;
 }
 .del {
   color: var(--bad);
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1;
   padding: 12px;
   margin: -12px;
 }
 .dim-text {
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 400;
 }
 .compositepick {
@@ -842,7 +936,7 @@ function confirmForceDelete() {
   flex: 1;
   border: 1px solid color-mix(in srgb, var(--fam-intake) 30%, transparent);
   color: var(--dim);
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   padding: 6px 0;
   font-family: var(--font-mono);
@@ -854,7 +948,7 @@ function confirmForceDelete() {
 .readonly-macro {
   justify-content: space-between;
   color: var(--dim);
-  font-size: 12px;
+  font-size: 14px;
   padding: 8px 0;
   border-bottom: 1px dashed color-mix(in srgb, var(--fam-intake) 20%, transparent);
 }
@@ -864,7 +958,7 @@ function confirmForceDelete() {
   align-items: baseline;
   column-gap: 8px;
   padding: 6px 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   border-bottom: 1px solid color-mix(in srgb, var(--fam-intake) 10%, transparent);
 }
@@ -878,13 +972,13 @@ function confirmForceDelete() {
   text-align: center;
   border: 1px solid color-mix(in srgb, var(--fam-intake) 45%, transparent);
   color: var(--fam-intake);
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   padding: 10px 0;
 }
 .deleteblocked {
   color: var(--bad);
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 0.3px;
   padding: 10px 14px;
   border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
@@ -899,7 +993,7 @@ function confirmForceDelete() {
 }
 .deletelink {
   color: var(--bad);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.5px;
   cursor: pointer;
 }

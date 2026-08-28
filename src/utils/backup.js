@@ -51,6 +51,12 @@ const KEYS = {
   sessionTypes: "atlas_session_types",
   trips: "atlas_trips",
   alarm: "atlas_helio_alarm",
+  // The list that replaced the single alarm on 2026-08-24. Carried for the same
+  // reason: an alarm is hand-entered, nothing can read the band's slots back to
+  // rebuild it, and a restore that lost it would leave somebody's mornings to
+  // whatever Zepp last wrote. The old key stays so a backup taken before the
+  // change still restores.
+  alarms: "atlas_helio_alarms",
   showAllVitals: "atlas_show_all_vitals",
   // **Both shipped on 2026-08-12, the same day as this file, and both were
   // missed.** Found on 2026-08-13 by taking a census of the real phone and

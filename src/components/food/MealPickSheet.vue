@@ -44,9 +44,9 @@
                commonest. Rows because they can say what they do: QUICK ADD's
                own name cannot carry "nothing is saved to the library", and a
                58px tile has nowhere to put it. -->
-          <template v-if="pickMealType">
+          <template v-if="adding">
             <div class="ways">
-              <button type="button" class="wayrow" @click="$emit('scan', chosenMealType)">
+              <button type="button" class="wayrow" @click="$emit('scan', activeMealType)">
                 <svg class="wayic" viewBox="0 0 24 24" aria-hidden="true" v-html="HOW_ICONS.scan" />
                 <span class="waylabel">Scan a barcode</span>
                 <span class="waysub mono">NEW ITEM</span>
@@ -56,12 +56,12 @@
                    than on the create button because SCAN was taken off that
                    button on purpose, and a rarer way in has no business
                    reclaiming the billing the commonest one lost. -->
-              <button type="button" class="wayrow" @click="$emit('batch-scan', chosenMealType)">
+              <button type="button" class="wayrow" @click="$emit('batch-scan', activeMealType)">
                 <svg class="wayic" viewBox="0 0 24 24" aria-hidden="true" v-html="HOW_ICONS.batchScan" />
                 <span class="waylabel">Scan several into a meal</span>
                 <span class="waysub mono">NEW MEAL</span>
               </button>
-              <button type="button" class="wayrow" @click="$emit('quick-add', chosenMealType)">
+              <button type="button" class="wayrow" @click="$emit('quick-add', activeMealType)">
                 <svg class="wayic" viewBox="0 0 24 24" aria-hidden="true" v-html="HOW_ICONS.quickAdd" />
                 <span class="waylabel">Quick add</span>
                 <span class="waysub mono">NOT SAVED</span>
@@ -314,7 +314,7 @@ function kindTag(item) {
 // favourites. Falls back to the unscoped count everywhere else (swap, the
 // ingredient picker), which is what those call sites want.
 const quickAccess = computed(() => {
-  const scope = props.pickMealType ? chosenMealType.value : props.mealType;
+  const scope = activeMealType.value;
   return options.value
     .map((item) => ({ item, count: food.logCountForItem(item.id, scope) }))
     .filter((x) => x.count > 0)
@@ -360,6 +360,24 @@ const unitLabel = computed(() => {
   return portion ? `${unit} (${portionText(quantity.value, portion)})` : unit;
 });
 const chosenMealType = ref(null);
+
+// The section this log will land in, however the sheet was told about it: the
+// user's pick when the sheet asked, the caller's when it was opened from a
+// section that already knows. One computed rather than the same conditional in
+// four places, which is how the way-in rows and the pick emit could disagree.
+const activeMealType = computed(() =>
+  props.pickMealType ? chosenMealType.value : props.mealType
+);
+
+// Whether this sheet is ADDING food to a day, as opposed to swapping a planned
+// meal or picking a composite's ingredient. Only an add has any business
+// offering a barcode or a quick add.
+//
+// This used to be `pickMealType` alone, which meant the three rows appeared on
+// the create button's ADD FOOD and nowhere else. Opening the same sheet from a
+// section's own + ADD row - the commonest way in there is - hid all three, so
+// adding to DINNER offered the library and nothing else.
+const adding = computed(() => props.pickMealType || !!props.mealType);
 watch(selected, (item) => {
   quantity.value = item?.baseAmount ?? 1;
   // chosenMealType deliberately survives: the section is picked before the
@@ -373,9 +391,13 @@ const headerText = computed(() => {
   // The chosen section is named even when a title was passed in. It used to be
   // short-circuited by `title`, so the header read a bare "ADD" beside a
   // [ CHANGE ] link offering to change something it never said.
-  if (props.pickMealType) {
+  // Named whether the sheet asked for the section or was handed it, because
+  // the way-in rows carry it into the scanner and the quick add: a bare "ADD"
+  // over three rows that all file something somewhere says nothing about
+  // where.
+  if (adding.value) {
     const label = MEAL_TYPE_OPTIONS.find(
-      (o) => o.key === chosenMealType.value
+      (o) => o.key === activeMealType.value
     )?.label;
     const base = props.title ?? "ADD";
     return label ? `${base} // ${label}` : (props.title ?? "ADD FOOD");
@@ -398,8 +420,7 @@ const canConfirm = computed(
 );
 
 function confirmPick() {
-  const mealType = props.pickMealType ? chosenMealType.value : props.mealType;
-  emit("pick", selected.value.id, quantity.value, mealType);
+  emit("pick", selected.value.id, quantity.value, activeMealType.value);
   selected.value = null;
 }
 </script>
@@ -484,7 +505,7 @@ function confirmPick() {
   white-space: nowrap;
 }
 .listgrouphd {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 2px;
   color: var(--fam-intake);
   padding: 8px 0 3px;
@@ -498,14 +519,14 @@ function confirmPick() {
   align-items: baseline;
   column-gap: 10px;
   padding: 8px 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.8px;
   cursor: pointer;
   border-bottom: 1px solid color-mix(in srgb, var(--fam-intake) 10%, transparent);
 }
 .kind {
-  font-size: 8px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--fam-intake);
   border: 1px solid color-mix(in srgb, var(--fam-intake) 40%, transparent);
@@ -521,7 +542,7 @@ function confirmPick() {
 }
 .dim-text {
   color: var(--dim);
-  font-size: 11px;
+  font-size: 13.5px;
   font-weight: 400;
   cursor: default;
 }
@@ -529,7 +550,7 @@ function confirmPick() {
   margin-top: 8px;
 }
 .qtylabel {
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 1px;
   color: var(--ink);
   margin-bottom: 10px;
@@ -557,7 +578,7 @@ function confirmPick() {
 .sectionbtn {
   min-height: 44px;
   padding: 0 2px;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.8px;
   background: none;
   color: var(--dim);
@@ -577,7 +598,7 @@ function confirmPick() {
 }
 .mealtypebtn {
   padding: 16px 8px;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 1.5px;
   background: none;
   color: var(--body);
@@ -611,7 +632,7 @@ function confirmPick() {
   flex: 1;
 }
 .waysub {
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 0.09em;
   color: var(--dim);
   flex: none;
@@ -629,7 +650,7 @@ function confirmPick() {
 .mealtypepick button {
   border: 1px solid color-mix(in srgb, var(--fam-intake) 30%, transparent);
   color: var(--dim);
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   padding: 9px 0;
 }
@@ -642,7 +663,7 @@ function confirmPick() {
   border: 1px solid color-mix(in srgb, var(--fam-intake) 45%, transparent);
   color: var(--ink);
   padding: 9px 11px;
-  font-size: 14px;
+  font-size: 15px;
 }
 .field[type="number"] {
   -moz-appearance: textfield;
@@ -656,7 +677,7 @@ function confirmPick() {
   flex: 0 0 100px;
 }
 .unit {
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -667,7 +688,7 @@ function confirmPick() {
 .back {
   flex: 1;
   text-align: center;
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   color: var(--dim);
   border: 1px solid color-mix(in srgb, var(--fam-intake) 30%, transparent);
@@ -676,7 +697,7 @@ function confirmPick() {
 .save {
   flex: 2;
   text-align: center;
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   color: var(--bg1);
   background: var(--fam-intake);

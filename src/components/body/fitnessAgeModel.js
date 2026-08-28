@@ -13,6 +13,7 @@ import {
   PROVISIONAL_MIN_DAYS,
 } from "@/utils/fitnessAge";
 import { addDays } from "@/utils/date";
+import { sessionWorkingHr } from "@/utils/sessionIntensity";
 
 /**
  * The resting heart rate the model wants: a multi-week average, not today's.
@@ -160,4 +161,114 @@ export function fitnessAgeFor(args) {
   const inputs = fitnessAgeInputs({ ...args, allowProvisional: true });
   const result = computeFitnessAge({ ...inputs, allowProvisional: true });
   return { ...result, inputsUsed: inputs };
+}
+
+/**
+ * Attach each session's **working** heart rate, read from the stored samples.
+ *
+ * Lives here rather than in `fitnessAge.js` for the reason at the top of this
+ * file: that module is the arithmetic and the citations, this one knows where
+ * numbers live. It is also why this is a separate pass rather than something
+ * `paIndexFrom` does - that function is pure and synchronous, and every screen
+ * that reads a session list is synchronous with it.
+ *
+ * **Sessions past the 90-day downsample keep their `hrAvg` and that is correct
+ * rather than a shortfall.** `downsampleOlderThan` collapses those samples into
+ * 15-minute averages, so the within-session spread a percentile needs is gone;
+ * there is nothing better to offer and inventing one would be worse. The count
+ * of sessions that did get a measured figure comes back on the index.
+ */
+export async function withWorkingHeartRate(sessions, getSamplesFn) {
+  const list = sessions ?? [];
+  if (!list.length) return list;
+
+  const out = [];
+  for (const session of list) {
+    const start = session?.startMillis;
+    const seconds = session?.activeSeconds;
+    if (!Number.isFinite(start) || !Number.isFinite(seconds) || seconds <= 0) {
+      out.push(session);
+      continue;
+    }
+    try {
+      const rows = await getSamplesFn("hr", start, start + seconds * 1000);
+      const { hr, source } = sessionWorkingHr(
+        session,
+        (rows ?? []).map((r) => r.v)
+      );
+      // Only a measured figure is attached. Falling back is `paIndexFrom`'s job
+      // and it already prefers `hrAvg` when this is absent - writing the average
+      // in here would make a fallback indistinguishable from a measurement.
+      out.push(source === "samples" ? { ...session, hrWorking: hr } : session);
+    } catch {
+      // A failed read is one session scored on the old estimator, not a page
+      // without a fitness age.
+      out.push(session);
+    }
+  }
+  return out;
+}
+
+/** How many weekly points the drill-through's history draws. */
+export const SERIES_WEEKS = 12;
+
+/**
+ * The fitness age as it stood on each of the last few weeks.
+ *
+ * **Recomputed rather than stored**, which is affordable only because
+ * `fitnessAgeFor` is pure once its inputs are in hand: every point re-runs the
+ * whole model against a truncated view of the same arrays, with no further
+ * reads. Freezing it would mean a rollup-shaped store for a figure that changes
+ * slowly and can always be rederived.
+ *
+ * **Age is recomputed per point, not held at today's.** A birthday inside the
+ * window moves the chronological age, and holding it fixed would draw a step in
+ * the fitness age on a day when nothing about the body changed.
+ *
+ * Points the model refuses are returned as nulls rather than dropped, so the
+ * chart can leave a gap where the history was too thin instead of joining across
+ * it - the same rule `historyChart.js` follows for a metric nobody recorded.
+ */
+export function fitnessAgeSeries({
+  profile,
+  entries = [],
+  dayWindow = [],
+  sessions = [],
+  todayKey,
+  weeks = SERIES_WEEKS,
+  dob = null,
+}) {
+  const out = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const at = addDays(todayKey, -i * 7);
+    const age = ageOn(dob, at) ?? profile?.age ?? null;
+    const result = fitnessAgeFor({
+      profile: { ...profile, age },
+      entries: entries.filter((e) => e?.date && e.date <= at),
+      dayWindow: dayWindow.filter((d) => d?.date && d.date <= at),
+      sessions: sessions.filter((s) => {
+        const start = s?.startMillis;
+        return Number.isFinite(start) && start <= Date.parse(`${at}T23:59:59`);
+      }),
+      todayKey: at,
+    });
+    out.push({
+      date: at,
+      value: result?.state === "ready" ? result.fitnessAge : null,
+      chronologicalAge: age,
+    });
+  }
+  return out;
+}
+
+/** Somebody's age on a given date, or null without a date of birth. */
+export function ageOn(dob, dateKey) {
+  if (!dob || !dateKey) return null;
+  const born = new Date(`${dob}T00:00:00`);
+  const on = new Date(`${dateKey}T00:00:00`);
+  if (Number.isNaN(born.getTime()) || Number.isNaN(on.getTime())) return null;
+  let age = on.getFullYear() - born.getFullYear();
+  const months = on.getMonth() - born.getMonth();
+  if (months < 0 || (months === 0 && on.getDate() < born.getDate())) age -= 1;
+  return age;
 }

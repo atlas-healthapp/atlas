@@ -108,7 +108,7 @@ defineEmits(["toggle"]);
   border: none;
   text-align: left;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--set-value);
   letter-spacing: 1.6px;
 }
 /* One line, always. At 13px with 1.6px tracking "HOME DIALS" wrapped to two,
@@ -134,7 +134,7 @@ defineEmits(["toggle"]);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--set-summary);
   letter-spacing: 1px;
 }
 .summary.err {

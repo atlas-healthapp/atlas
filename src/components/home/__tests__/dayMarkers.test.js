@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   axisFraction,
-  labelAnchor,
+  labelPlacement,
   hoursFrom,
   dayRow,
   clockTime,
@@ -12,7 +12,13 @@ import {
   AXIS_TO,
   AXIS_TICKS,
   placeLabels,
+  gapNeeded,
+  labelExtent,
+  MK_FONT_PX,
+  MK_LETTER_SPACING,
 } from "@/components/home/dayMarkers";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const at = (iso) => new Date(iso).getTime();
 
@@ -173,10 +179,17 @@ describe("label collision", () => {
 
   it("does not let a dropped label reserve space", () => {
     // The middle one is dropped, so the third is judged against the first only.
+    //
+    // **`b` is deliberately much wider than `a` and only just behind it.** The
+    // original fixture put two five-character labels 0.005 apart, which is 1.4
+    // units on this axis: `b` reserved almost exactly the span `a` already had,
+    // so anything clearing `a` cleared `b` too and the case passed whether the
+    // rule held or not. A wide `b` reaches well past `a` on the right, so `c`
+    // sits in space that only `b` could have claimed.
     const out = placeLabels([
-      { id: "a", at: 0.5, text: "18:20" },
-      { id: "b", at: 0.505, text: "18:22" },
-      { id: "c", at: 0.62, text: "19:40" },
+      { id: "a", at: 0.2, text: "10:29" },
+      { id: "b", at: 0.25, text: "18:50→20:49" },
+      { id: "c", at: 0.45, text: "19:40" },
     ]);
     expect(out.map((o) => o.show)).toEqual([true, false, true]);
   });
@@ -258,31 +271,163 @@ describe("dayRow label flags", () => {
   });
 });
 
-describe("labelAnchor", () => {
+describe("labelPlacement", () => {
   // Reported from the phone: a 06:01 wake put WOKE and its time centred on the
   // first mark of the axis, at x=6 in a 300-wide box, and the card clipped both
   // to "OKE" and ":01".
-  it("hangs a label at the left edge rightward", () => {
-    expect(labelAnchor(6, "WOKE")).toBe("start");
-    expect(labelAnchor(6, "6:01")).toBe("start");
+  it("keeps a label at the left edge inside the drawing", () => {
+    const p = labelPlacement(0, "WOKE");
+    expect(p.from).toBeCloseTo(2, 5);
+    expect(p.shifted).toBe(true);
   });
 
-  it("hangs a label at the right edge leftward", () => {
-    expect(labelAnchor(294, "23:41")).toBe("end");
+  it("keeps a label at the right edge inside the drawing", () => {
+    const p = labelPlacement(1, "23:41");
+    expect(p.to).toBeLessThanOrEqual(298);
+    expect(p.shifted).toBe(true);
   });
 
-  it("leaves a label with room on both sides centred on its mark", () => {
-    expect(labelAnchor(150, "18:20")).toBe("middle");
+  it("leaves a label with room on both sides exactly on its mark", () => {
+    const p = labelPlacement(0.5, "18:20");
+    expect(p.x).toBe(p.mark);
+    expect(p.shifted).toBe(false);
   });
 
-  // The anchor moves, never the position: the label has to keep pointing at the
-  // mark it belongs to.
+  // **The change of 2026-08-28.** This used to flip the label's anchor, which
+  // displaces it by half its own width however little room was actually needed -
+  // a 01:30 bedtime wanted 8.8 units and was moved 20, so it sat well left of
+  // the dot it names and took the space its neighbour needed. Moving it by the
+  // least amount that fits is what keeps it under its own mark.
+  it("moves an edge label by the least amount that fits, not by half its width", () => {
+    const p = labelPlacement(0.975, "01:30");
+    const halfWidth = (p.to - p.from) / 2;
+    expect(p.mark - p.x).toBeLessThan(halfWidth);
+    expect(p.to).toBeCloseTo(298, 5);
+  });
+
   it("decides from the text's own width", () => {
-    expect(labelAnchor(20, "18:20→18:32")).toBe("start");
-    expect(labelAnchor(20, "6")).toBe("middle");
+    // A wide label at the same mark has to move further than a narrow one.
+    const wide = labelPlacement(0.05, "18:20→18:32");
+    const narrow = labelPlacement(0.05, "6");
+    expect(wide.shifted).toBe(true);
+    expect(narrow.shifted).toBe(false);
   });
 
   it("treats a missing label as having no width", () => {
-    expect(labelAnchor(150, null)).toBe("middle");
+    const p = labelPlacement(0.5, null);
+    expect(p.from).toBe(p.to);
+    expect(p.shifted).toBe(false);
+  });
+});
+
+// The check that did not exist when this went wrong.
+//
+// `CHAR_W` is a prediction of how wide `.mk` renders, and `.mk` is set in a
+// stylesheet this module cannot see. For months the two disagreed - the label
+// grew from 8.5px to 13px on 2026-08-27 and the prediction stayed at 8.5 - and
+// nothing anywhere failed, because two `<text>` nodes overlapping is not an
+// error, it is a drawing. So the stylesheet is read here and compared, the same
+// way families.test.js reads style.css rather than trusting a copy of it.
+describe("the type it predicts", () => {
+  const vue = readFileSync(
+    resolve(process.cwd(), "src/components/home/RecoveryPage.vue"),
+    "utf8"
+  );
+  const block = vue.slice(vue.indexOf("\n.mk {"));
+  const body = block.slice(0, block.indexOf("}"));
+
+  it("matches the font size .mk is actually set in", () => {
+    const size = /font-size:\s*([\d.]+)px/.exec(body);
+    expect(size).not.toBeNull();
+    expect(Number(size[1])).toBe(MK_FONT_PX);
+  });
+
+  it("matches the letter-spacing .mk is actually set in", () => {
+    const spacing = /letter-spacing:\s*([\d.]+)px/.exec(body);
+    expect(spacing).not.toBeNull();
+    expect(Number(spacing[1])).toBe(MK_LETTER_SPACING);
+  });
+
+  // The regression itself, read off the phone on 2026-08-28: woke 10:29,
+  // trained 18:50 to 20:49, in bed 01:30. Measured in the rendered SVG, the
+  // merged session label ran to 248.8 and the bedtime began at 246.8, and the
+  // card read `18:50→20:4901:30`.
+  //
+  // The cause was not the label widths but the anchoring. A 01:30 bedtime sits
+  // at 97.5% of the axis, so its label is anchored `end` and hangs LEFT of its
+  // mark - while `placeLabels` had cleared it against the centred position it
+  // would have taken if there were room.
+  const realDay = () =>
+    dayRow({
+      date: "2026-08-27",
+      sessions: [
+        {
+          startMillis: at("2026-08-27T18:50:00"),
+          endMillis: at("2026-08-27T20:49:00"),
+          activeSeconds: 119 * 60,
+        },
+      ],
+      wakeMs: at("2026-08-27T10:29:00"),
+      bedMs: at("2026-08-28T01:30:00"),
+    });
+
+  it("does not print a session's times into the bedtime beside it", () => {
+    const row = realDay();
+    const drawn = [];
+    if (row.showWakeText) drawn.push(labelExtent(row.wake, row.wakeText));
+    if (row.showBedText) drawn.push(labelExtent(row.bed, row.bedText));
+    for (const s of row.spans) {
+      if (s.showMergedText) drawn.push(labelExtent(s.mergedAt, s.mergedText));
+      if (s.showStartText) drawn.push(labelExtent(s.from, s.startText));
+      if (s.showEndText) drawn.push(labelExtent(s.to, s.endText));
+    }
+    const sorted = drawn.sort((a, b) => a.from - b.from);
+    for (let i = 1; i < sorted.length; i++) {
+      expect(sorted[i].from).toBeGreaterThanOrEqual(sorted[i - 1].to);
+    }
+  });
+
+  it("says both ends of the session, not just its start", () => {
+    // What the smaller type and the minimal clamp bought between them. At 12px
+    // with the label displaced half its width, these two cleared each other by
+    // 0.9 units - a fit on this day's data and a collision on the next - so the
+    // session had to fall back to its start alone. At 11px with the clamp the
+    // margin is 7.8 and both times fit.
+    const row = realDay();
+    const span = row.spans[0];
+    expect(span.showMergedText).toBe(true);
+    expect(span.mergedText).toBe("18:50→20:49");
+    expect(row.showBedText).toBe(true);
+  });
+
+  it("keeps the bedtime under its own dot", () => {
+    // 01:30 is at the far right of the axis, so its label has to come inward or
+    // the card clips it. Inward by the least that fits: it still straddles the
+    // mark it names rather than sitting entirely to one side of it.
+    const row = realDay();
+    const p = labelPlacement(row.bed, row.bedText);
+    expect(p.to).toBeCloseTo(298, 5);
+    expect(p.from).toBeLessThan(p.mark);
+    expect(p.to).toBeGreaterThan(p.mark);
+  });
+
+  it("still falls back to the start time when even that will not fit", () => {
+    // The mechanism has not gone, it is just no longer needed on this day. A
+    // session ending nearer the bedtime still cannot print both ends.
+    const row = dayRow({
+      date: "2026-08-27",
+      sessions: [
+        {
+          startMillis: at("2026-08-27T21:40:00"),
+          endMillis: at("2026-08-27T23:20:00"),
+          activeSeconds: 100 * 60,
+        },
+      ],
+      bedMs: at("2026-08-28T01:30:00"),
+    });
+    const span = row.spans[0];
+    expect(span.showMergedText).toBe(true);
+    expect(span.mergedText).toBe("21:40");
+    expect(span.mergedAt).toBeCloseTo(span.from, 5);
   });
 });

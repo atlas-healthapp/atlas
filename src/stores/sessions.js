@@ -317,6 +317,12 @@ export const useSessionsStore = defineStore("sessions", () => {
         hrSampleCount: s.measured?.samples ?? 0,
         caloriesEstimated: s.measured?.kcal != null,
         caloriesProvisional: s.measured?.kcalProvisional ?? false,
+        // **How it was derived, not just that it was.** "EST" says a figure is
+        // not measured and stops there, which leaves the reader unable to tell a
+        // number built from their own heart rate through the session from one
+        // built from an activity name and a clock. Those are different claims
+        // and the first is far the better of the two.
+        caloriesSource: s.measured?.kcalSource ?? null,
         distanceMeters: null,
         altitudeAvgMeters: null,
       }))

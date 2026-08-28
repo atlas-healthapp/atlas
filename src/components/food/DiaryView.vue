@@ -85,10 +85,19 @@
       :key="section.key"
       class="panel sectionpanel"
     >
-      <div class="panel-hd">
-        <span>{{ section.label }}</span
-        ><span class="sectotal">{{ totalsLabel(section.totals) }}</span>
-      </div>
+      <!-- The whole header opens the breakdown. SAVE AS A MEAL used to sit here
+           as a third element on a 10px line beside the name and the totals,
+           which is what made it read as cluttered; it lives in the sheet now,
+           where it has a row of its own. -->
+      <button
+        class="panel-hd secopen"
+        type="button"
+        :disabled="!section.items.length"
+        @click.stop="breakdownOf = section"
+      >
+        <span>{{ section.label }}</span>
+        <span v-if="section.items.length" class="chev" aria-hidden="true">›</span>
+      </button>
       <!-- A template wrapper, because each row owns the extra lines beneath it
            and they have to share its scope. -->
       <template v-for="row in section.items" :key="row.key">
@@ -97,11 +106,13 @@
           @click.stop="row.logged ? (rowActions = row) : null"
         >
           <span class="name">{{ row.name }}</span>
-          <span class="macro mono"
-            >{{ row.protein }}G{{
-              row.fibre != null ? " · " + row.fibre + "G FIBRE" : ""
-            }}</span
-          >
+          <!-- Calories, and only calories. It used to be protein plus a
+               sometimes-fibre: a bare "10G" that did not say of what, and a
+               figure whose absence read as missing data rather than as zero.
+               Both are goals that are OFF by default while calories is ON, so
+               the row was printing what nobody opted into and hiding what they
+               did. Every other number is a tap away in the breakdown. -->
+          <span class="macro mono">{{ kcalLabel(row) }}</span>
           <button
             v-if="!row.logged"
             class="log mono"
@@ -120,11 +131,20 @@
           @click.stop="rowActions = row"
         >
           <span class="name">+ {{ ex.name }}</span>
-          <span class="macro mono">{{ Math.round(ex.protein ?? 0) }}G</span>
+          <span class="macro mono">{{
+            ex.kcal != null ? Math.round(ex.kcal) + " KCAL" : ""
+          }}</span>
         </div>
       </template>
       <div v-if="!section.items.length" class="emptyrow dim-text mono">
         NOTHING LOGGED YET
+      </div>
+      <!-- The section's totals sit under the rows they are the total of, which
+           is where a total belongs. They were in the header, competing with the
+           section name on a 10px line; down here they have room to be read at
+           full ink instead of as a dim caption. -->
+      <div v-if="section.items.length" class="secfoot mono">
+        {{ totalsLabel(section.totals) }}
       </div>
       <!-- A row of its own, because the whole panel used to be the tap target and
            every logged row stopped the click. With one thing logged, "add another"
@@ -141,6 +161,7 @@
       @add-extra="addingExtraTo = rowActions"
       @remove-extra="onRemoveExtra"
       @set-component="onSetComponent"
+      @set-quantity="onSetQuantity"
       @remove-component="onRemoveComponent"
       @close="rowActions = null"
       @delete="onRowDelete"
@@ -158,6 +179,10 @@
 
     <MetricPage v-if="openMetric" :def="openMetric" from="FOOD" @close="openMetric = null" />
 
+    <!-- The other three ways in hand off to the sheets CreateSheets already
+         mounts, rather than mounting a second copy here: one scanner, one
+         quick add, and they land on whatever day the diary is showing because
+         CreateSheets reads `ui.diaryDate`. -->
     <MealPickSheet
       v-if="addingFor"
       :kinds="addKinds"
@@ -165,6 +190,27 @@
       title="ADD"
       @close="addingFor = null"
       @pick="onAddPick"
+      @scan="onOtherWayIn('scan', $event)"
+      @batch-scan="onOtherWayIn('batch-scan', $event)"
+      @quick-add="onOtherWayIn('quick-add', $event)"
+    />
+
+    <SectionBreakdownSheet
+      v-if="breakdownOf"
+      :rows="breakdownOf.items"
+      :section-label="breakdownOf.label"
+      :totals="breakdownOf.totals"
+      @close="breakdownOf = null"
+      @save-as-meal="openMealFromBreakdown"
+    />
+
+    <SectionMealSheet
+      v-if="makingMealFrom"
+      :rows="loggedRowsOf(makingMealFrom)"
+      :section-label="makingMealFrom.label"
+      :date="date"
+      @close="makingMealFrom = null"
+      @saved="onMealSaved"
     />
 
     <!-- Anything is addable as an extra, including a whole meal: what you put
@@ -184,14 +230,19 @@ import { computed, ref } from "vue";
 import { useFoodStore, mealTypeFromTime } from "@/stores/food";
 import { useCheckinStore } from "@/stores/checkin";
 import { useGoalsStore } from "@/stores/goals";
+import { useUIStore } from "@/stores/ui";
 import { today, addDays } from "@/utils/date";
 import MealPickSheet from "./MealPickSheet.vue";
 import DiaryRowActions from "./DiaryRowActions.vue";
+import SectionMealSheet from "./SectionMealSheet.vue";
+import SectionBreakdownSheet from "./SectionBreakdownSheet.vue";
+import { energySplit } from "./energySplit";
 import MetricPage from "@/components/metrics/MetricPage.vue";
 import { metric as metricDef } from "@/utils/metricRegistry";
 
 const food = useFoodStore();
 const checkin = useCheckinStore();
+const ui = useUIStore();
 // A plain reactive object, so every GOALS.x below reads live and works the
 // same in the template as it does here. See stores/goals.js.
 const GOALS = useGoalsStore().values;
@@ -383,33 +434,10 @@ const dayMacros = computed(() => {
 //
 // The headline number is the logged kcal rather than this sum: an item's own
 // calorie figure is the one it was labelled with.
-const ENERGY_PARTS = [
-  { key: "protein", label: "PROTEIN", perGram: 4, color: "var(--fam-intake)" },
-  { key: "carbs", label: "CARBS", perGram: 4, color: "var(--macro-carbs)" },
-  { key: "fat", label: "FAT", perGram: 9, color: "var(--macro-fat)" },
-];
-const energy = computed(() => {
-  const m = dayMacros.value;
-  const raw = ENERGY_PARTS.map((p) => ({
-    ...p,
-    grams: Math.round(m[p.key] ?? 0),
-    energy: (m[p.key] ?? 0) * p.perGram,
-  }));
-  const total = raw.reduce((sum, p) => sum + p.energy, 0);
-  // Nobody eats a day of pure protein: carbs and fat both at zero means the
-  // items were logged without those figures, not that the food had none. The
-  // shares are withheld rather than shown as 100% protein.
-  const split = (m.carbs ?? 0) + (m.fat ?? 0) > 0;
-  return {
-    kcal: Math.round(m.kcal),
-    kcalText: m.kcal ? Math.round(m.kcal).toLocaleString() : "—",
-    split,
-    parts: raw.map((p) => ({
-      ...p,
-      pct: split && total ? Math.round((p.energy / total) * 100) : 0,
-    })),
-  };
-});
+// Moved into `energySplit.js` so the section breakdown draws the same three
+// tiles from the same arithmetic. Two copies of this is exactly how a sheet
+// ends up disagreeing with the panel it opened from.
+const energy = computed(() => energySplit(dayMacros.value));
 
 // The two with targets. Fibre keeps the family blue at 62%: it is the same
 // family as protein rather than a fourth idea, and tone is all two labelled
@@ -465,6 +493,63 @@ function onAddPick(itemId, quantity, mealType) {
   addingFor.value = null;
 }
 
+// ── the section breakdown, and saving a section as a meal ──────────────────
+const breakdownOf = ref(null); // the section whose breakdown is open
+const makingMealFrom = ref(null); // the section whose save sheet is open
+
+/**
+ * What a row contributes, which is now the only figure on the row.
+ *
+ * Blank rather than 0 KCAL when the item never carried one: a quick add with
+ * no calorie figure is an unknown, and printing zero would make the row look
+ * like free food.
+ */
+function kcalLabel(row) {
+  const kcal = row.macros?.kcal;
+  return kcal == null ? "" : `${Math.round(kcal)} KCAL`;
+}
+
+/**
+ * The breakdown hands off to the save sheet rather than stacking on top of it.
+ *
+ * Two scrims deep is where the app stops being able to say what CLOSE means,
+ * and this is one subject at two levels of detail rather than two subjects.
+ */
+function openMealFromBreakdown() {
+  makingMealFrom.value = breakdownOf.value;
+  breakdownOf.value = null;
+}
+
+/**
+ * A section's LOGGED rows only.
+ *
+ * A planned-but-unconfirmed slot is not food you ate, so it has no business in
+ * a recipe built from what you ate. Nothing creates slots any more, but the
+ * read path still surfaces the plans that already hold some.
+ */
+function loggedRowsOf(section) {
+  return section.items.filter((r) => r.logged !== false);
+}
+
+function onMealSaved({ name }) {
+  makingMealFrom.value = null;
+  // Reuses the toast the library save already had, which supplies its own
+  // "SAVED TO THE LIBRARY" - so this carries the name and nothing else.
+  savedToLibrary.value = name;
+  setTimeout(() => {
+    savedToLibrary.value = "";
+  }, 2600);
+}
+
+// Scan / scan several / quick add, from a section that already knows which one
+// it is. The picker closes first: the sheet being opened takes its place
+// rather than stacking on top of it, and leaving it mounted would put the
+// library list behind the scanner.
+function onOtherWayIn(sheet, mealType) {
+  addingFor.value = null;
+  ui.openCreateSheet(sheet, mealType ?? null);
+}
+
 // Tapping a LOGGED row opens DiaryRowActions (DELETE / MOVE TO) - replaces
 // an earlier long-press-drag attempt that didn't work reliably on a real
 // device. Rows still pending (LOG button showing) aren't tappable this way;
@@ -514,6 +599,22 @@ function onSetComponent({ index, quantity }) {
   const row = rowActions.value;
   if (row) food.setComponentQuantity(props.date, row.kind, row.index, index, quantity);
 }
+/**
+ * How much of the meal was eaten, corrected after the fact.
+ *
+ * Stays open like the ingredient steppers above it, and for the same reason:
+ * this is a thing you do two or three times in a row, and closing after each tap
+ * would make the second correction cost another journey back into the row.
+ *
+ * Nothing is refreshed by hand: the sheet is fed `activeRow`, which re-finds the
+ * row from the live sections every time they rebuild, so the amount and the
+ * ingredient list under it both follow the store.
+ */
+function onSetQuantity(quantity) {
+  const row = rowActions.value;
+  if (row) food.setEntryQuantity(props.date, row.kind, row.index, quantity);
+}
+
 function onRemoveComponent(index) {
   const row = rowActions.value;
   if (row) food.removeComponent(props.date, row.kind, row.index, index);
@@ -581,7 +682,7 @@ const savedToLibrary = ref("");
   background: var(--bg2);
   border: 1px solid color-mix(in srgb, var(--fam-intake) 40%, transparent);
   color: var(--fam-intake);
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1.4px;
   text-align: center;
 }
@@ -623,7 +724,7 @@ const savedToLibrary = ref("");
   cursor: default;
 }
 .daynav .date {
-  font-size: 11.5px;
+  font-size: 14px;
   letter-spacing: 2px;
   color: var(--ink);
   min-width: 110px;
@@ -635,7 +736,7 @@ const savedToLibrary = ref("");
 .daynav .pill {
   flex: 1;
   text-align: right;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 1.5px;
   color: var(--dim);
   cursor: default;
@@ -770,7 +871,7 @@ const savedToLibrary = ref("");
   width: 8px;
   text-align: right;
   color: var(--dim);
-  font-size: 14px;
+  font-size: 15px;
 }
 .mrow .v {
   flex: none;
@@ -787,10 +888,24 @@ const savedToLibrary = ref("");
   align-items: baseline;
   column-gap: 10px;
   padding: 7px 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.6px;
-  border-bottom: 1px solid color-mix(in srgb, var(--fam-intake) 10%, transparent);
+}
+/* **Lines BETWEEN rows, never after the last one.**
+ *
+ * This was a `border-bottom` on every row, which put a faint line under the
+ * last entry a pixel above the totals' own heavier rule - a double underline
+ * where one line was wanted.
+ *
+ * The first attempt at fixing it was `.diaryrow:last-of-type`, and it silently
+ * did nothing: `:last-of-type` matches the last element of its TAG among its
+ * siblings, and the last `div` in a section panel is `.secfoot`, not a row. So
+ * no row ever matched. A sibling selector has no such trap - it draws the line
+ * above each row that follows another, which by construction cannot put one
+ * after the last. */
+.diaryrow + .diaryrow {
+  border-top: 1px solid color-mix(in srgb, var(--fam-intake) 10%, transparent);
 }
 .diaryrow .name {
   overflow-wrap: anywhere;
@@ -805,7 +920,7 @@ const savedToLibrary = ref("");
   padding-bottom: 9px;
 }
 .extrarow .name {
-  font-size: 13px;
+  font-size: 14.5px;
   color: var(--fam-intake);
 }
 .extrarow .macro {
@@ -813,12 +928,47 @@ const savedToLibrary = ref("");
 }
 .diaryrow .macro {
   text-align: right;
-  font-size: 9px;
+  font-size: 13px;
   color: var(--dim);
   white-space: nowrap;
 }
 /* 44px is the row minimum the rest of the app holds to, and the reason this
    exists at all: it replaced a whole-panel click that every row swallowed. */
+/* The section header is a button now, so it needs the button reset. It keeps
+   `.panel-hd`'s own type and colour from style.css and only undoes what a
+   <button> brings with it. */
+.secopen {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  align-items: baseline;
+  min-height: 32px;
+}
+.secopen:disabled {
+  /* A section with nothing in it has no breakdown to open, but it must not
+     look switched off - the header is still the section's name. */
+  opacity: 1;
+}
+/* Under the rows, not in the header. A total belongs beneath the column it
+   totals, and moving it off that 10px header line is what lets the section
+   name read as a heading again. Full ink rather than the dim it had as a
+   caption: down here there is room for it to be a figure. */
+.secfoot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-line);
+  font-size: var(--fs-micro);
+  letter-spacing: 1.4px;
+  color: var(--ink);
+}
+.secopen .chev {
+  margin-left: 8px;
+  letter-spacing: 0;
+  font-size: 14.5px;
+  color: var(--dim);
+}
 .addrow {
   display: block;
   width: 100%;
@@ -828,14 +978,14 @@ const savedToLibrary = ref("");
   border: none;
   background: none;
   text-align: left;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--fam-intake);
 }
 .diaryrow .log {
   color: var(--bg1);
   background: var(--fam-intake);
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 1px;
   padding: 4px 8px;
   border: none;
@@ -845,7 +995,7 @@ const savedToLibrary = ref("");
 }
 .dim-text {
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 400;
 }
 </style>

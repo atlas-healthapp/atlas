@@ -111,11 +111,11 @@ const summary = computed(() =>
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 44px;
+  min-height: var(--set-row-h);
   border-bottom: 1px solid color-mix(in srgb, var(--dim) 12%, transparent);
 }
 .dlabel {
-  font-size: 11px;
+  font-size: var(--set-micro);
   letter-spacing: 1.2px;
   color: var(--body);
 }
@@ -130,7 +130,7 @@ const summary = computed(() =>
   border: 1px solid color-mix(in srgb, var(--dim) 35%, transparent);
   border-radius: 5px;
   color: var(--dim);
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 1px;
   cursor: pointer;
 }

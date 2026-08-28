@@ -156,7 +156,7 @@ function onPointerUp(event) {
   justify-content: space-between;
   gap: 8px;
   margin-top: 5px;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.8px;
   color: var(--dim);
 }
@@ -165,7 +165,7 @@ function onPointerUp(event) {
 }
 .empty {
   margin-top: 12px;
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   color: var(--dim);
 }

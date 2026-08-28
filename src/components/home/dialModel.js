@@ -1,4 +1,4 @@
-import { familyColor } from "@/utils/families";
+import { familyColor, familyInkColor } from "@/utils/families";
 
 /**
  * Which of Home's three rings shows what.
@@ -46,11 +46,29 @@ export const DIAL_LABELS = {
   routine: "ROUTINE",
 };
 
-/** Which family colours each ring. Recovery and routine are not plain metrics. */
-function colorFor(key) {
+/**
+ * Which family colours each ring. Recovery and routine are not plain metrics.
+ *
+ * Exported because the settings picker draws a swatch per dial and would
+ * otherwise need its own copy of the routine-is-habits rule, which is the one
+ * kind of duplication `families.js` exists to prevent.
+ */
+export function dialColor(key) {
   if (key === "routine") return familyColor("habits");
   return familyColor(key);
 }
+
+/**
+ * The same, for anything that sets *text* rather than a stroke. Gold clears the
+ * 3:1 a gauge stroke owes and misses the 4.5:1 a small label owes on both light
+ * themes, so Recovery - and only Recovery - reads a darker token here.
+ */
+export function dialInkColor(key) {
+  if (key === "routine") return familyInkColor("habits");
+  return familyInkColor(key);
+}
+
+
 
 function pct(value, goal) {
   // A goal switched off leaves the ring empty rather than full: dividing by null
@@ -92,7 +110,7 @@ export function dialFor(key, v) {
         label: DIAL_LABELS[key],
         pct: v.sleepPct ?? 0,
         text: v.sleepText,
-        color: colorFor("sleep"),
+        color: dialColor("sleep"),
         // The hours, because the figure above is the score. Whichever of the two
         // is not leading is the one worth saying underneath.
         sub: v.sleepHoursText ?? null,
@@ -105,7 +123,7 @@ export function dialFor(key, v) {
         pct: pct(v.habitsDone, v.habitsDue),
         // The count, not a percentage. "3/9" says what is left; "33%" does not.
         text: v.habitsDue ? `${v.habitsDone}/${v.habitsDue}` : "--",
-        color: colorFor("routine"),
+        color: dialColor("routine"),
         opens: "routine",
       };
     default: {
@@ -118,7 +136,7 @@ export function dialFor(key, v) {
         label: DIAL_LABELS[key] ?? key,
         pct: pct(value, goal),
         text: v.texts?.[key] ?? (value == null ? "--" : String(Math.round(value))),
-        color: colorFor(key),
+        color: dialColor(key),
         // "OF 160G", formatted by the registry rather than here, so the widget
         // cannot print a unit the rest of the app does not use.
         sub: v.subs?.[key] ?? null,

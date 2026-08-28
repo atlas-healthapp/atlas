@@ -94,7 +94,7 @@ const subTab = computed({
   flex: 1;
   border: 1px solid color-mix(in srgb, var(--fam-intake) 30%, transparent);
   color: var(--dim);
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 2px;
   padding: 9px 0;
 }
@@ -107,7 +107,7 @@ const subTab = computed({
 }
 .dim-text {
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 400;
 }
 </style>

@@ -110,6 +110,21 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
 
         void onAuthResult(boolean success, String detail);
 
+        /**
+         * What the band's own workout detection is set to.
+         *
+         * <p>Default-implemented, so the several listeners that have no interest
+         * in it are untouched. Sensitivity is -1 when the band did not report
+         * one, and {@code alert} is null for the same reason - absent is not the
+         * same claim as off.
+         */
+        default void onBandConfig(byte groupVersion, int sensitivity, Boolean alert) {
+        }
+
+        /** Whether the band accepted a settings write. */
+        default void onBandConfigWritten(boolean accepted) {
+        }
+
         /** A real reading, decrypted with the negotiated session key. */
         void onBattery(int levelPercent, boolean charging);
 
@@ -188,6 +203,17 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
      * half a minute.
      */
     private byte[] pendingAlarm;
+    /**
+     * A config write waiting for a link, same idea as {@link #pendingAlarm}.
+     *
+     * <p>Queuing it for the next background sync was tried first and was wrong:
+     * the send only ran from the service's own listener, so a sync started by
+     * the app read the setting and never acted on the queue. The change sat on
+     * PENDING indefinitely. A settings write should behave like the alarm -
+     * connect, write, wait for the answer - because that is a thing the user
+     * just asked for and is watching.
+     */
+    private byte[] pendingConfig;
     private boolean loggedFirstHeartRate;
     private final android.os.Handler keepalive = new android.os.Handler(android.os.Looper.getMainLooper());
 
@@ -343,6 +369,18 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
     }
 
     /**
+     * Opens a link that writes one band setting and nothing else.
+     *
+     * <p>The alarm's path exactly: no fetch, closes on the acknowledgement. A
+     * settings write is something the user is watching happen, so it gets its
+     * own connect rather than riding whenever the next sync happens to run.
+     */
+    public void connectForConfig(final byte[] payload) {
+        this.pendingConfig = payload;
+        connect(0, false, 0L);
+    }
+
+    /**
      * Write an alarm over a link that is already open and authenticated.
      *
      * <p><b>This exists because the background service could never write one at
@@ -409,6 +447,7 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
             // rather than left to be picked up by an unrelated later connect.
             if (pendingAlarm != null) {
                 pendingAlarm = null;
+        pendingConfig = null;
                 listener.onAlarmSet(false, -1);
             } else {
                 listener.onClosed("already connected");
@@ -575,9 +614,33 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
             // the sequence number we derived from the handshake.
             if (payload.length > 0 && payload[0] == CMD_CAPABILITIES_RESPONSE) {
                 log("=== ENCRYPTED OK === (" + payload.length + "B capabilities reply)");
-            } else {
-                log("! encrypted check: unexpected reply " + payload.length + "B");
+                return;
             }
+            // The band's own settings. Decoded in HelioConfig, which is a pure
+            // class with its own tests, so nothing about the byte layout is
+            // decided here.
+            if (payload.length > 0 && payload[0] == HelioConfig.CMD_RESPONSE) {
+                final HelioConfig.Reply reply = HelioConfig.parse(payload);
+                if (reply.ok) {
+                    log("band workout detection: sensitivity="
+                            + HelioConfig.sensitivityName(reply.sensitivity())
+                            + " alert=" + reply.alert()
+                            + " (group v" + reply.version + ")");
+                    listener.onBandConfig(reply.version, reply.sensitivity(), reply.alert());
+                } else {
+                    log("! could not read the band's workout settings (" + payload.length + "B)");
+                }
+                return;
+            }
+            if (payload.length > 0 && payload[0] == HelioConfig.CMD_ACK) {
+                final boolean ok = HelioConfig.accepted(payload);
+                log("band config write " + (ok ? "accepted" : "refused"));
+                // **Trail the outcome, not just the decision.** That gap is what
+                // hid the alarm never leaving the phone for three weeks.
+                listener.onBandConfigWritten(ok);
+                return;
+            }
+            log("! encrypted check: unexpected reply " + payload.length + "B");
             return;
         }
         if (endpoint == HelioAlarm.ENDPOINT) {
@@ -621,12 +684,31 @@ public class HelioLink implements HelioAuth.Transport, HelioFetch.Transport {
         // Proves the encrypted path before anything depends on it.
         if (Boolean.TRUE.equals(endpointEncrypted.get((int) ENDPOINT_CONFIG))) {
             sendToService(ENDPOINT_CONFIG, new byte[]{CMD_CAPABILITIES_REQUEST});
+            // And, on the same endpoint, what the band's workout detection is
+            // set to. **Asked, never waited for.** A Sunday walk left no record
+            // because Zepp had detection sensitivity on Low, which Atlas could
+            // not see; this is how it becomes visible. Nothing downstream gates
+            // on the answer, so a band that ignores the request costs a frame
+            // and changes nothing else.
+            sendToService(ENDPOINT_CONFIG, HelioConfig.requestWorkoutDetection());
         } else {
             log("config endpoint is not encrypted here, skipping the encrypted check");
         }
 
         if (liveHeartRate) {
             startRealtimeHeartRate();
+            return;
+        }
+        if (pendingConfig != null) {
+            final byte[] configFrame = pendingConfig;
+            pendingConfig = null;
+            if (!Boolean.TRUE.equals(endpointEncrypted.get((int) HelioConfig.ENDPOINT))) {
+                log("! this firmware does not list the config endpoint as encrypted");
+                listener.onBandConfigWritten(false);
+                return;
+            }
+            log("setting workout detection…");
+            sendToService(HelioConfig.ENDPOINT, configFrame);
             return;
         }
         if (pendingAlarm != null) {

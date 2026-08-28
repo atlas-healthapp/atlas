@@ -301,7 +301,7 @@ export function metric(key) {
  * for steps. Collapsing the two would report "you took no steps" for a day the
  * strap simply had nothing to say.
  */
-export function formatValue(def, value, { empty = "--" } = {}) {
+export function formatValue(def, value, { empty = "--", average = false } = {}) {
   if (value == null) return empty;
   // **The one place a stored value becomes a displayed one, which is the only
   // place a unit conversion may happen.** Storage stays metric: a conversion
@@ -314,6 +314,12 @@ export function formatValue(def, value, { empty = "--" } = {}) {
   if (def.format === "decimal1") {
     return `${(Math.round(value * 10) / 10).toFixed(1)}${def.unit ?? ""}`;
   }
+  // **An average keeps a decimal place; a reading does not.** A mean of seven
+  // whole numbers almost never is one, and rounding it printed 3.6 g of
+  // creatine as "4G" - which is both wrong and indistinguishable from a day you
+  // actually took 4. `count` is deliberately left out: steps averaged to
+  // "7,234.5" is false precision on a figure nobody reads to the step.
+  if (average) return `${(Math.round(value * 10) / 10).toFixed(1)}${def.unit ?? ""}`;
   return `${Math.round(value)}${def.unit ?? ""}`;
 }
 

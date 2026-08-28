@@ -166,7 +166,7 @@ function reset() {
 <style scoped>
 .ghd {
   margin: 14px 0 4px;
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 2px;
 }
 .ghd:first-child {
@@ -195,7 +195,7 @@ function reset() {
 }
 .glabel {
   flex: 1 1 auto;
-  font-size: 12px;
+  font-size: var(--set-summary);
   letter-spacing: 1.2px;
   color: var(--body);
 }
@@ -214,7 +214,7 @@ function reset() {
   border: 1px solid color-mix(in srgb, var(--acc) 26%, transparent);
   border-radius: 6px;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   text-align: right;
 }
 .gnum:focus {
@@ -226,13 +226,13 @@ function reset() {
 }
 .gunit {
   width: 42px;
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 1.2px;
   color: var(--dim);
 }
 .note {
   margin: 14px 0 0;
-  font-size: 10.5px;
+  font-size: var(--set-label);
   line-height: 1.6;
   letter-spacing: 1px;
   color: var(--dim);
@@ -250,11 +250,11 @@ function reset() {
 }
 .databtn {
   flex: 1;
-  min-height: 44px;
+  min-height: var(--set-row-h);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--dim) 65%, transparent);
   color: var(--ink);
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 0.1em;
   cursor: pointer;
 }

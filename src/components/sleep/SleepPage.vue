@@ -1287,7 +1287,7 @@ function barWidth(stage) {
   gap: 10px;
   padding: 8px 0;
   border-top: 1px solid var(--panel-line);
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1px;
 }
 .naprow:first-of-type {
@@ -1342,7 +1342,7 @@ function barWidth(stage) {
 .histaxis {
   display: flex;
   justify-content: space-between;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
   padding-top: 6px;
@@ -1366,7 +1366,7 @@ function barWidth(stage) {
   position: absolute;
   left: 0;
   transform: translateY(-50%);
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -1388,7 +1388,7 @@ function barWidth(stage) {
   right: 0;
   text-align: center;
   font-style: normal;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 0;
   color: var(--dim);
 }
@@ -1413,14 +1413,14 @@ function barWidth(stage) {
 .nbn {
   width: 100%;
   border-collapse: collapse;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 0.5px;
   font-variant-numeric: tabular-nums;
 }
 .nbn th {
   text-align: right;
   font-weight: 400;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
   padding-bottom: 7px;
@@ -1468,43 +1468,15 @@ function barWidth(stage) {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 6px;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
 .napnote {
   margin-top: 10px;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
-}
-.page {
-  position: fixed;
-  inset: 0;
-  z-index: 600;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg1);
-  color: var(--body);
-  font-family: var(--font-sans);
-  /* Safe-area padding on the shell, never on the scrolling child: on the child
-     the inset scrolls away with the content and the header rides up under the
-     status icons. */
-  padding: calc(12px + env(safe-area-inset-top)) 18px
-    calc(20px + env(safe-area-inset-bottom));
-  overflow: hidden;
-  animation: pagein 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-@keyframes pagein {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .page {
-    animation: none;
-  }
 }
 .pscroll {
   flex: 1;
@@ -1518,7 +1490,7 @@ function barWidth(stage) {
 
 
 .empty {
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -1533,7 +1505,7 @@ function barWidth(stage) {
   min-width: 0;
 }
 .bandlabel {
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   color: var(--fam-body);
 }
@@ -1600,7 +1572,7 @@ function barWidth(stage) {
 .scalelabels {
   display: flex;
   margin-top: 7px;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.2px;
 }
 .scalelabels span {
@@ -1673,7 +1645,7 @@ function barWidth(stage) {
   gap: 8px;
 }
 .edetail-hd {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.4px;
   color: var(--dim);
 }
@@ -1713,7 +1685,7 @@ function barWidth(stage) {
 }
 .tref,
 .tpts {
-  font-size: 11.5px;
+  font-size: 14px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -1733,12 +1705,12 @@ function barWidth(stage) {
 }
 .tnote {
   margin-top: 6px;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   color: var(--dim);
 }
 .withheld {
-  font-size: 11px;
+  font-size: 13.5px;
   line-height: 1.7;
   color: var(--dim);
   margin: 14px 0 0;
@@ -1764,7 +1736,7 @@ function barWidth(stage) {
   padding: 12px 12px 10px;
 }
 .boxlabel {
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1.8px;
   color: var(--dim);
   margin-bottom: 10px;
@@ -1783,7 +1755,7 @@ function barWidth(stage) {
   height: 194px;
 }
 .tick {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.5px;
   fill: var(--dim);
   font-family: var(--font-mono);
@@ -1795,7 +1767,7 @@ function barWidth(stage) {
   align-items: center;
   gap: 10px;
   margin: 26px 0 10px;
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1.8px;
   color: var(--dim);
 }
@@ -1812,7 +1784,7 @@ function barWidth(stage) {
    page's own. */
 .expand {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.6px;
   color: var(--dim);
   background: none;
@@ -1907,7 +1879,7 @@ function barWidth(stage) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 11.5px;
+  font-size: 14px;
   letter-spacing: 1.4px;
   color: var(--dim);
   flex: none;
@@ -1936,7 +1908,7 @@ function barWidth(stage) {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -1986,7 +1958,7 @@ function barWidth(stage) {
   position: relative;
   width: 36px;
   flex: none;
-  font-size: 8.5px;
+  font-size: 13px;
   letter-spacing: 0.4px;
   color: var(--dim);
 }
@@ -2013,7 +1985,7 @@ function barWidth(stage) {
 .regax {
   display: flex;
   margin: 6px 0 0 44px;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -2026,13 +1998,13 @@ function barWidth(stage) {
   color: var(--fam-body);
 }
 .usualline {
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1.4px;
   color: var(--dim);
   margin-top: 9px;
 }
 .axisnote {
-  font-size: 10.5px;
+  font-size: 13.5px;
   line-height: 1.6;
   letter-spacing: 0.8px;
   color: var(--dim);
@@ -2046,7 +2018,7 @@ function barWidth(stage) {
 .axis {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1px;
   color: var(--dim);
   margin-top: 8px;
@@ -2099,7 +2071,7 @@ function barWidth(stage) {
   border: 1px solid var(--panel-line);
   border-radius: 8px;
   padding: 11px 12px;
-  font-size: 11px;
+  font-size: 13.5px;
   line-height: 1.7;
   color: var(--dim);
 }
@@ -2144,7 +2116,7 @@ function barWidth(stage) {
   gap: 14px;
 }
 .builtfacts dt {
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1.6px;
   color: var(--dim);
   margin-bottom: 4px;

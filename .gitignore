@@ -21,3 +21,11 @@ dist/
 android/keystore.properties
 *.jks
 *.keystore
+
+# The phone's own archive, pulled across for layout work. Never committed:
+# it is real health data and the private repo is not the place for a dump of it.
+.devicestate/
+
+# Claude Code: the permission allowlist is shared, the machine-local overrides
+# are not (they hold absolute paths from whichever machine wrote them).
+.claude/settings.local.json

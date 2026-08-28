@@ -51,7 +51,7 @@ defineEmits(["edit", "pick"]);
   align-items: baseline;
   column-gap: 8px;
   padding: 7px 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   border-bottom: 1px solid color-mix(in srgb, var(--fam-intake) 10%, transparent);
@@ -91,7 +91,7 @@ defineEmits(["edit", "pick"]);
   min-width: 0;
 }
 .tag-slot {
-  font-size: 8px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--fam-intake);
   border: 1px solid color-mix(in srgb, var(--fam-intake) 40%, transparent);

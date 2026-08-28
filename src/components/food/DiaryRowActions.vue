@@ -15,7 +15,37 @@
           <span class="rowname">{{ row.name.toUpperCase() }}</span>
           <span class="rowclose" @click="$emit('close')">[ CLOSE ]</span>
         </div>
-        <div v-if="amount" class="amount mono">{{ amount }}</div>
+        <!-- **How much of it you ate, and it is editable** (2026-08-27). This was
+             a read-only line: `addSnack` took a quantity when you logged and
+             nothing could change it afterwards, so one serving becoming two meant
+             deleting the row and adding it again. Reported exactly that way.
+
+             It replaces the old amount line rather than sitting under it: the
+             amount and how much you ate are one fact, and printing it twice is
+             the defect the creatine page was just cleaned of.
+
+             Printed through `formatAmount`, which every screen showing an amount
+             has to use: a base unit taking a count reads `50 G` and one already
+             carrying its own amount takes a multiplier and reads `x2 · 125 G`,
+             and treating them alike once produced `1 1 PORTION (25 G)`. -->
+        <div v-if="amount" class="amount mono" :class="{ editable: canSetQuantity }">
+          <template v-if="canSetQuantity">
+            <button
+              class="step mono"
+              type="button"
+              :disabled="(row.quantity ?? 1) <= STEP"
+              aria-label="Less"
+              @click="stepQuantity(-1)"
+            >
+              −
+            </button>
+            <span class="amountv">{{ amount }}</span>
+            <button class="step mono" type="button" aria-label="More" @click="stepQuantity(1)">
+              +
+            </button>
+          </template>
+          <template v-else>{{ amount }}</template>
+        </div>
 
         <div v-if="macroList.length" class="macros">
           <div v-for="m in macroList" :key="m.key" class="macro">
@@ -156,6 +186,7 @@ const emit = defineEmits([
   "add-extra",
   "remove-extra",
   "set-component",
+  "set-quantity",
   "remove-component",
   "save-to-library",
 ]);
@@ -205,6 +236,22 @@ const ingredients = computed(() =>
 );
 
 const editable = computed(() => canEditComponents(libraryItem.value, props.row));
+
+/**
+ * Whether how much you ate can be changed here.
+ *
+ * Needs a library item, because the amount is printed in that item's own base
+ * unit and a quick add has none - its macros were typed for the day rather than
+ * scaled from anything, so there is no portion to double.
+ */
+const canSetQuantity = computed(() => Boolean(libraryItem.value) && props.row.quantity != null);
+
+/** Same half-serving step as the ingredients below, so the sheet has one feel. */
+function stepQuantity(direction) {
+  const next = +(((props.row.quantity ?? 1) + direction * STEP).toFixed(2));
+  if (next < STEP) return;
+  emit("set-quantity", next);
+}
 
 // Which ingredient is open, by its index. One at a time: the sheet's job is
 // showing what the meal was, and fifteen controls over five ingredients buries
@@ -293,7 +340,7 @@ const otherTypes = computed(() =>
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 3px;
   color: var(--fam-intake);
   margin-bottom: 16px;
@@ -301,6 +348,14 @@ const otherTypes = computed(() =>
 .panel-hd span:last-child {
   cursor: pointer;
   color: var(--dim);
+}
+.amount.editable {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.amount.editable .amountv {
+  min-width: 0;
 }
 .amount {
   font-size: var(--fs-label);
@@ -467,7 +522,7 @@ const otherTypes = computed(() =>
 .savelib {
   width: 100%;
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   color: var(--fam-intake);
   border: 1px solid color-mix(in srgb, var(--fam-intake) 45%, transparent);
@@ -477,7 +532,7 @@ const otherTypes = computed(() =>
 .deletebtn {
   width: 100%;
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   color: var(--bad);
   border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
@@ -485,7 +540,7 @@ const otherTypes = computed(() =>
   margin-bottom: 16px;
 }
 .movelabel {
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 2px;
   color: var(--dim);
   margin-bottom: 8px;
@@ -493,7 +548,7 @@ const otherTypes = computed(() =>
 .movebtn {
   width: 100%;
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 1px;
   color: var(--fam-intake);
   border: 1px solid color-mix(in srgb, var(--fam-intake) 30%, transparent);

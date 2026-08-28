@@ -33,9 +33,21 @@ const BACKUP = fileURLToPath(new URL("../backup.js", import.meta.url));
  */
 const DELIBERATELY_EXCLUDED = {
   atlas_helio_connected: "refilled by reconnecting; the auth key is carried",
+  // Whether the band refused the key, which is a fact about this phone's link to
+  // this strap right now. Restoring it would put a red "pair it again" panel in
+  // front of somebody whose very first sync may well succeed, and the first sync
+  // sets it correctly either way.
+  atlas_helio_auth_rejected: "decided by the next connect, not by the backup",
   atlas_helio_last_sync: "cache, refilled by the next sync",
   atlas_helio_battery: "cache, refilled by the next sync",
   atlas_summary_native: "a mirror of state that is carried",
+  // Derived from the workouts store, which IS carried, and rewritten by the
+  // next ingest. Restoring it would only tell the service not to announce
+  // sessions it has never seen, which is a worse answer than letting it
+  // reseed silently on the first sync after a restore.
+  atlas_workout_floor_native: "a mirror of the workouts store, refilled by the next sync",
+  atlas_update_native:
+    "what GitHub said the newest release is, re-asked within six hours of any launch",
   // A handoff, not a setting: MainActivity writes which widget was tapped and
   // App.vue reads it and clears it on the next resume. It is meaningless a
   // second later, let alone on another phone.

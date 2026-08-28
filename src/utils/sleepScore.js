@@ -537,11 +537,25 @@ export const SLEEP_TERM_LABEL = {
  */
 export const SLEEP_TERM_INFO = {
   duration: {
-    info: "How long you were actually asleep, against your 8 hour goal.\n\nIt carries the most weight of the four, because a short night is a short night whatever its shape.",
+    // **Corrected 2026-08-27.** This said "against your 8 hour goal", which the
+    // scorer explicitly refuses: `durationTerm` takes the worse of the clinical
+    // 7-9h band and your own habitual median clamped into it, and the note beside
+    // DURATION_FULL says outright that GOALS.sleep is not used, because an 8h
+    // floor docked anyone habitually sleeping 7.5h and was unreleasable. Naming a
+    // goal the calculation does not have is backlog item W13 in a second place.
+    info: "How long you were actually asleep, against the 7 to 9 hour range and against your own habitual night.\n\nIt carries the most weight of the four, because a short night is a short night whatever its shape.",
     detail: {
       label: "WORTH KNOWING",
       items: [
         "This is time asleep, not time in bed. The two differ by however long you took to drop off.",
+        // **Known stale, and deliberately not rewritten.** DURATION_CURVE reads
+        // 9.5 -> 0.88, 10 -> 0.72, 11 -> 0.5, so a tenth hour scores about 28%
+        // less than the eighth rather than the same: this describes a plateau
+        // that a penalty replaced. It is left alone because the penalty itself is
+        // an open decision - measured over 34 nights on 2026-08-26, length does
+        // not predict brokenness and the penalty is docking the cleanest nights.
+        // If the penalty goes this sentence becomes true again on its own; if it
+        // stays, this has to say so plainly. Do not "fix" one without the other.
         "It stops rewarding you at the goal. A tenth hour scores the same as the eighth, which is why a long night has to earn its score on the other three terms.",
       ],
     },

@@ -20,6 +20,71 @@ const HelioBle = registerPlugin("HelioBle");
 // the theme before the WebView exists.
 const KEY = "atlas_summary_native";
 
+/** The app's own workout watermark. See publishWorkoutFloor. */
+const WORKOUT_FLOOR_KEY = "atlas_workout_floor_native";
+
+/**
+ * The newest released version the app has heard about.
+ *
+ * **The app does the asking and native only restates it**, the same division
+ * every other key here runs on. `updateCheck` already fetches GitHub and caches
+ * the answer in localStorage, which Java cannot read, so without this the
+ * service would have to make its own request, on its own schedule, with its own
+ * idea of what counts as newer. Two implementations of "is there an update" is
+ * how two surfaces end up disagreeing about whether there is one.
+ */
+const UPDATE_KEY = "atlas_update_native";
+
+/**
+ * The newest workout the app itself has stored, for the background service.
+ *
+ * **A second key rather than a field on the summary, deliberately.** The summary
+ * is Home's snapshot of the day and it is republished wholesale on every
+ * foreground; a value written into it by one side is overwritten by the other's
+ * next publish, which is exactly the defect that made the service and the app
+ * disagree about `hrNow`. This is a one-way handover with no arithmetic in it,
+ * so it gets its own key and neither side ever rewrites the other's.
+ *
+ * **What it fixes.** `HelioSyncService.announceSessions` watermarks what it has
+ * announced, but it can only see its own fetches. A session first collected by
+ * a foreground sync - a pull-to-refresh, say - was therefore announced by the
+ * service later as news, for something already on screen; and the pull itself
+ * announced nothing, because only the service can post. Measured on the device
+ * 2026-08-27: a session fetched by a pull at 21:18 sat behind a service
+ * watermark still reading 13:41, with the next tick due at 21:35.
+ */
+export async function publishWorkoutFloor(startMillis) {
+  if (!Capacitor.isNativePlatform()) return false;
+  if (!Number.isFinite(startMillis) || startMillis <= 0) return false;
+  try {
+    await Preferences.set({ key: WORKOUT_FLOOR_KEY, value: String(Math.round(startMillis)) });
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Tell native which version is available, so the service can say so once.
+ *
+ * Only ever the version string. The service does not need the URL or the notes:
+ * tapping opens Atlas, and Settings carries the link, because there is no
+ * in-app installer and the honest action is "open the releases page".
+ *
+ * Fire-and-forget like the rest of this file. A failed write costs one
+ * notification that does not appear, and the in-app flag says the same thing.
+ */
+export async function publishAvailableVersion(version) {
+  if (!Capacitor.isNativePlatform()) return false;
+  if (!version || typeof version !== "string") return false;
+  try {
+    await Preferences.set({ key: UPDATE_KEY, value: version });
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Publish today's headline numbers for the native surfaces.
  *

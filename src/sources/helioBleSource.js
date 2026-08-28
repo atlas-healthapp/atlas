@@ -45,8 +45,33 @@ export const SOURCE_ID = "helio-ble";
 export const EARLIEST_PLAUSIBLE = Date.parse("2020-01-01T00:00:00Z");
 export const FUTURE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * **The same reading arriving twice is collapsed before it is written.**
+ *
+ * The band re-sends its whole window on every fetch rather than only what is
+ * new, so a night of background syncs leaves the native cache holding heavily
+ * overlapping copies of the same readings - one file per run, each covering most
+ * of what the last one covered. The drain then handed every row of every file to
+ * `putSamples`, which is keyed on `[metric, t]`: the duplicates overwrote each
+ * other and the archive came out correct, at the cost of one IndexedDB write per
+ * duplicate. That is what the morning's `UPDATING · N%` was mostly spending its
+ * time on, and why the figure ran to six digits against an archive of 159k.
+ *
+ * **Provably not a behaviour change.** The last occurrence of a key wins here,
+ * which is what `putSamples` already did by writing them in order and letting
+ * the last put stand. So the stored result is identical row for row; only the
+ * number of writes changes. Order of the output does not matter downstream -
+ * the puts are keyed, the watermark is a max, and the touched dates are a set.
+ *
+ * This sits in `normaliseSamples` rather than in the drain because both paths
+ * come through here, and the sync path has the same overlap in miniature: a
+ * fetch that asks for the last N days re-collects everything it collected an
+ * hour ago.
+ */
 export function normaliseSamples(raw) {
-  const out = [];
+  // Keyed rather than a list scanned for matches: the input runs to six figures
+  // and anything quadratic in it would cost more than the writes it saves.
+  const kept = new Map();
   const ceiling = Date.now() + FUTURE_TOLERANCE_MS;
   for (const sample of raw ?? []) {
     if (!sample || typeof sample.t !== "number" || !Number.isFinite(sample.t)) continue;
@@ -54,9 +79,9 @@ export function normaliseSamples(raw) {
     const v = typeof sample.v === "number" ? sample.v : Number(sample.v);
     if (!Number.isFinite(v)) continue;
     if (!isMeaningful(sample.metric, v)) continue;
-    out.push({ metric: sample.metric, t: sample.t, v });
+    kept.set(`${sample.metric}|${sample.t}`, { metric: sample.metric, t: sample.t, v });
   }
-  return out;
+  return [...kept.values()];
 }
 
 /** base64 (how the plugin ships bytes across the bridge) to a Uint8Array. */

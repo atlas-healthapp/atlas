@@ -424,7 +424,7 @@ defineExpose({ close: () => (open.value = false) });
 }
 .sat-label {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.3px;
   text-anchor: middle;
   fill: var(--ink);

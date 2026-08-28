@@ -31,7 +31,7 @@ const ui = useUIStore();
   border: none;
   background: var(--acc);
   color: var(--bg1);
-  font-size: 13px;
+  font-size: 14.5px;
   letter-spacing: 0.3px;
   line-height: 1;
   cursor: pointer;

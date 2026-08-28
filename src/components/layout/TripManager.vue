@@ -109,7 +109,7 @@ function add() {
   text-shadow: 0 0 16px color-mix(in srgb, var(--acc) 50%, transparent);
 }
 .sys {
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 2px;
   color: var(--dim);
 }
@@ -124,13 +124,13 @@ function add() {
   margin: 14px 0 20px;
 }
 .back {
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 2px;
   color: var(--acc);
   cursor: pointer;
 }
 .title {
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 3px;
   color: var(--dim);
   margin-left: auto;
@@ -142,7 +142,7 @@ function add() {
   color: var(--ink);
   padding: 8px 10px;
   margin-bottom: 8px;
-  font-size: 14px;
+  font-size: 15px;
   font-family: var(--font-sans);
 }
 .daterow {
@@ -151,12 +151,12 @@ function add() {
 }
 .daterow .field {
   flex: 1;
-  font-size: 12px;
+  font-size: 14px;
 }
 .save {
   width: 100%;
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   color: var(--bg1);
   background: var(--acc);
@@ -170,7 +170,7 @@ function add() {
   align-items: center;
   gap: 10px;
   padding: 6px 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
 }
 .tmain {
@@ -181,12 +181,12 @@ function add() {
   min-width: 0;
 }
 .range {
-  font-size: 8px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
 .del {
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--bad);
   border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
@@ -195,7 +195,7 @@ function add() {
 }
 .dim-text {
   color: var(--dim);
-  font-size: 11px;
+  font-size: 13.5px;
   font-weight: 400;
 }
 </style>

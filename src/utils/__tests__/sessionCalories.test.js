@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  calorieSourceLabel,
   DEFAULT_CONSTANT,
   MIN_FIT_SESSIONS,
   MIN_MINUTES,
@@ -257,5 +258,21 @@ describe("metCalories", () => {
 
   it("withholds without a weight", () => {
     expect(metCalories({ met: 7, weightKg: null, minutes: 42 })).toBe(null);
+  });
+});
+
+describe("calorieSourceLabel", () => {
+  // The two are not the same claim: measured on this archive, heart rate lands
+  // within 4.2% of the band and a MET table manages 9.1% at its most flattering.
+  it("tells the two derivations apart", () => {
+    expect(calorieSourceLabel("hr")).toBe("FROM HEART RATE");
+    expect(calorieSourceLabel("met")).toBe("FROM TYPE AND TIME");
+  });
+
+  // A measured figure needs no caption, and printing one would imply it was
+  // derived like the others.
+  it("says nothing about a figure that was measured", () => {
+    expect(calorieSourceLabel(null)).toBeNull();
+    expect(calorieSourceLabel("band")).toBeNull();
   });
 });

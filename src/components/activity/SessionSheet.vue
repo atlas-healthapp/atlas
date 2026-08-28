@@ -392,7 +392,7 @@ function doCancel() {
 }
 .flab {
   display: block;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.14em;
   color: var(--dim);
   margin-bottom: 7px;
@@ -416,7 +416,7 @@ function doCancel() {
 }
 .chev {
   color: var(--dim);
-  font-size: 18px;
+  font-size: 19px;
 }
 .note {
   margin-top: 12px;
@@ -472,13 +472,13 @@ function doCancel() {
   font-variant-numeric: tabular-nums;
 }
 .liveunit {
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 0.13em;
   color: var(--dim);
 }
 .livezone {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.12em;
   color: var(--dim);
 }
@@ -491,7 +491,7 @@ function doCancel() {
   position: absolute;
   top: 0;
   transform: translateX(-50%);
-  font-size: 9px;
+  font-size: 13px;
   color: var(--ink);
 }
 .strip {
@@ -518,7 +518,7 @@ function doCancel() {
   display: flex;
   justify-content: space-between;
   margin-top: 5px;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.1em;
   color: var(--dim);
   font-variant-numeric: tabular-nums;
@@ -547,7 +547,7 @@ function doCancel() {
 }
 .wayin .sub {
   margin-left: auto;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.1em;
   color: var(--dim);
 }

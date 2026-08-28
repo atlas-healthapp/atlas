@@ -412,7 +412,14 @@ const paiNote = computed(() => {
 }
 .pill {
   font-size: var(--fs-label);
-  letter-spacing: 0.8px;
+  /* **Tracking is for short labels, not for a line.** At 0.8px this string paid
+     about 20px of its width in gaps between letters, and after the type scale
+     went up on 2026-08-27 that was the difference between "OUTDOOR CLIMBING ·
+     12:33 PM" fitting and the clock being ellipsed mid-time. Same reasoning as
+     ProfileChip's near-zero tracking: mono tracking that suits a four-letter
+     label works against a twenty-six character one. The longest type names can
+     still truncate, and the ellipsis is the right answer when they do. */
+  letter-spacing: 0.3px;
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
@@ -491,7 +498,7 @@ const paiNote = computed(() => {
   flex: 1;
   text-align: center;
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.6px;
   color: var(--dim);
 }
@@ -552,12 +559,20 @@ const paiNote = computed(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/* **Brought into line with the diary's macro tiles** (2026-08-26, reported as
+   wanting to be bigger and to look more like FOOD's). The two were the same idea
+   drawn at different sizes: this one set its figures at 21px against the diary's
+   27 and its labels at a hardcoded 10.5px against the type scale's own token, so
+   the same kind of number read as less important on this tab than on that one.
+   Everything here now matches `DiaryView`'s `.tiles`, including the surface -
+   these sat on `--bg1`, which recessed them into the page rather than letting
+   them sit on the card they belong to. */
 .tiles {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1px;
   background: color-mix(in srgb, var(--dim) 14%, transparent);
-  border-radius: 6px;
+  border-radius: 7px;
   overflow: hidden;
   margin: 2px 0 6px;
 }
@@ -565,9 +580,9 @@ const paiNote = computed(() => {
    tile looks like a tile again. Left-aligned and full width, or the figures stop
    lining up with the labels above them. */
 .tile {
-  background: var(--bg1);
+  background: var(--panel);
   padding: 10px 12px 11px;
-  min-height: 72px;
+  min-height: 78px;
   display: block;
   width: 100%;
   border: none;
@@ -585,29 +600,34 @@ const paiNote = computed(() => {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  font-size: 10.5px;
-  letter-spacing: 1.4px;
+  font-size: var(--fs-label);
+  letter-spacing: 1.2px;
   color: var(--fam-activity);
 }
 .tile .chev {
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1;
   letter-spacing: 0;
   opacity: 0.75;
 }
 .tile .v {
-  font-size: 21px;
+  font-size: 27px;
+  line-height: 1.2;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
-  margin: 2px 0 5px;
+  margin: 3px 0 4px;
 }
+/* The PAI delta rides inside the figure, so it takes the label size rather than
+   the figure's: at 11px against 21px it read as a footnote stuck to a number,
+   and against 27px it would have disappeared. */
 .tile .v small {
-  font-size: 11px;
+  font-size: var(--fs-label);
+  letter-spacing: 0.5px;
   color: var(--dim);
 }
 .tile .sub {
-  font-size: var(--fs-micro);
-  letter-spacing: 0.8px;
+  font-size: var(--fs-label);
+  letter-spacing: 1px;
   color: var(--dim);
 }
 </style>

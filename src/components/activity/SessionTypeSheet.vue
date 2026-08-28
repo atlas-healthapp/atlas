@@ -206,13 +206,13 @@ function onEnter() {
   border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent);
   border-radius: 7px;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: 1px;
 }
 .search::placeholder {
   color: var(--dim);
   letter-spacing: 1.4px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .search:focus {
   outline: none;
@@ -236,7 +236,7 @@ function onEnter() {
   border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--dim) 14%, transparent);
   color: var(--body);
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: 0.6px;
   text-align: left;
   cursor: pointer;
@@ -247,14 +247,14 @@ function onEnter() {
 .opt.create {
   color: var(--fam-activity);
   letter-spacing: 1.4px;
-  font-size: 12.5px;
+  font-size: 14px;
 }
 /* Dimmer than your own types, because these are not yours yet. The heading
    carries the whole distinction, so the rows themselves stay the same shape. */
 .sugghd {
   margin-top: 16px;
   padding: 0 2px 6px;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.8px;
   color: var(--dim);
 }
@@ -263,7 +263,7 @@ function onEnter() {
 }
 .plus {
   color: var(--fam-activity);
-  font-size: 15px;
+  font-size: 16px;
 }
 .opt:focus-visible {
   outline: 2px solid var(--acc);
@@ -274,7 +274,7 @@ function onEnter() {
 }
 .empty {
   padding: 18px 2px;
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -286,7 +286,7 @@ function onEnter() {
   border: 1px solid color-mix(in srgb, var(--dim) 40%, transparent);
   border-radius: 7px;
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: 14px;
   letter-spacing: 1.8px;
   cursor: pointer;
 }

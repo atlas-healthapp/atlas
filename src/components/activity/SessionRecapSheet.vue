@@ -99,7 +99,12 @@
             </div>
           </div>
 
-          <div v-if="kcal" class="est mono">~{{ kcal }} KCAL EST</div>
+          <!-- Says what it was built from rather than only that it is an
+               estimate: a figure from your own heart rate through the session is
+               a different claim from one from an activity name and a clock. -->
+          <div v-if="kcal" class="est mono">
+            ~{{ kcal }} KCAL {{ kcalSource ?? "EST" }}
+          </div>
 
           <!-- **Said where the figures are, not at the bottom of the sheet.** A
                recap opens provisional far more often than not: the live trail only
@@ -161,6 +166,7 @@ import {
   zoneRows,
 } from "./sessionRecap";
 import { lineGeometry } from "@/utils/historyChart";
+import { calorieSourceLabel } from "@/utils/sessionCalories";
 import SessionTypeSheet from "./SessionTypeSheet.vue";
 
 const props = defineProps({
@@ -215,6 +221,9 @@ const chart = computed(() => {
 });
 const kcal = computed(
   () => sessions.annotationFor(props.startMillis)?.measured?.kcal ?? null
+);
+const kcalSource = computed(() =>
+  calorieSourceLabel(sessions.annotationFor(props.startMillis)?.measured?.kcalSource)
 );
 
 /**
@@ -350,7 +359,7 @@ function doDiscard() {
 }
 .flab {
   display: block;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.14em;
   color: var(--dim);
   margin-bottom: 7px;
@@ -373,11 +382,11 @@ function doDiscard() {
 }
 .chev {
   color: var(--dim);
-  font-size: 18px;
+  font-size: 19px;
 }
 .hd2 {
   margin-top: 20px;
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 0.16em;
   color: var(--fam-activity);
 }
@@ -394,7 +403,7 @@ function doDiscard() {
   font-variant-numeric: tabular-nums;
 }
 .figcap {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.13em;
   color: var(--dim);
   margin-top: 4px;
@@ -409,7 +418,7 @@ function doDiscard() {
   display: flex;
   justify-content: space-between;
   margin-top: 3px;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 0.1em;
   color: var(--dim);
   font-variant-numeric: tabular-nums;
@@ -424,7 +433,7 @@ function doDiscard() {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.1em;
 }
 .zname {

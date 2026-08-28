@@ -4,6 +4,11 @@
        dimmed hero, and two components would drift the moment either changed. -->
   <HomeCard title="FITNESS AGE" :meta="meta" :color="famColor('weight')">
     <template v-if="result.state === 'ready'">
+      <!-- **The way in, and only in the ready state.** Everything else on BODY
+           opens something, so a card that never did read as broken; but a
+           withheld figure has nothing to explain that the card is not already
+           saying. A button rather than a click handler on the card, so it is
+           reachable by keyboard and announces itself. -->
       <div class="hero">
         <span class="n" :class="{ soft: result.provisional }">{{ shown }}</span>
         <span v-if="qualifier" class="u mono">{{ qualifier }}</span>
@@ -17,7 +22,10 @@
       <div class="scale">
         <div class="track">
           <span class="youmark" :style="{ left: `${pct(shownAge)}%` }"></span>
-          <span class="agemark" :style="{ left: `${pct(result.chronologicalAge)}%` }"></span>
+          <span
+            class="agemark"
+            :style="{ left: `${pct(result.chronologicalAge)}%` }"
+          ></span>
         </div>
         <!-- **The ends label the track; a legend labels the marks.** The first
              version put "YOU ARE 32" in the middle cell of this row, which is
@@ -33,7 +41,8 @@
         <div class="legend mono">
           <span class="key"><i class="swatch you"></i>YOU {{ shown }}</span>
           <span class="key"
-            ><i class="swatch age"></i>YOUR AGE {{ Math.round(result.chronologicalAge) }}</span
+            ><i class="swatch age"></i>YOUR AGE
+            {{ Math.round(result.chronologicalAge) }}</span
           >
         </div>
       </div>
@@ -42,7 +51,9 @@
         <div v-for="row in rows" :key="row.key" class="item">
           <span class="k mono">{{ row.label }}</span>
           <span class="v mono">{{ row.reading }}</span>
-          <span class="y mono" :class="row.years < 0 ? 'down' : 'up'">{{ row.yearsText }}</span>
+          <span class="y mono" :class="row.years < 0 ? 'down' : 'up'">{{
+            row.yearsText
+          }}</span>
         </div>
       </div>
 
@@ -56,6 +67,19 @@
            MetricPage already uses for exactly this. Do not quietly reinstate
            them here; the reason they were removed was the position, not the
            content. -->
+
+      <!-- **One way in, and it is the row** (settled 2026-08-26 after four
+           versions). A dim `WHY` under the verdict read as a footnote; a chevron
+           beside the 52px hero competed with the number it was meant to serve; a
+           chevron in the header with the whole card tappable was built and then
+           pulled on the user's call, because two affordances on one card is one
+           more than it needs and the header one had nothing to label itself with.
+           A labelled row at the foot says what it opens, which is the thing none
+           of the others could do. -->
+      <button class="opener" type="button" @click.stop="$emit('open')">
+        <span class="olabel mono">DETAILS</span>
+        <span class="ocar" aria-hidden="true">&rsaquo;</span>
+      </button>
     </template>
 
     <!-- Option D: below the floor there is genuinely nothing to say, so it
@@ -95,6 +119,8 @@ import {
   PROVISIONAL_MIN_DAYS,
 } from "@/utils/fitnessAge";
 
+defineEmits(["open"]);
+
 const props = defineProps({
   /** Whatever `fitnessAgeFor` returned. */
   result: { type: Object, required: true },
@@ -113,9 +139,18 @@ function pct(age) {
   return Math.max(1, Math.min(99, at));
 }
 
+/**
+ * **The form label came off on 2026-08-27.** It sat in the header saying `BMI`,
+ * which is the body form the model used - and the body row itself left the card
+ * a day earlier, so the label was qualifying a row that is no longer here. A
+ * header slot naming an input the card does not show reads as a category for the
+ * whole card, which fitness age is not. It is still on the drill-through, beside
+ * the reading it belongs to. PROVISIONAL stays: that one is about the figure in
+ * the hero, which is what a header meta is for.
+ */
 const meta = computed(() => {
   if (props.result.state !== "ready") return "";
-  return props.result.provisional ? "PROVISIONAL" : props.result.formLabel;
+  return props.result.provisional ? "PROVISIONAL" : "";
 });
 
 const qualifier = computed(() => (props.result.provisional ? "SO FAR" : ""));
@@ -132,21 +167,45 @@ const verdict = computed(() => {
   }
   // An exact match is worth saying outright rather than rendering as "0 years
   // older", which reads as a rounding artifact.
-  if (gap === 0) return "Your estimated fitness is what is average for your age.";
-  return `Your estimated fitness matches somebody ${gap} ${gap === 1 ? "year" : "years"} ${direction} than you.`;
+  if (gap === 0)
+    return "Your estimated fitness is what is average for your age.";
+  // "than you" came off on 2026-08-27: it is already implied by younger, and
+  // the scale directly under this marks your real age beside the figure.
+  return `Your estimated fitness matches somebody ${gap} ${
+    gap === 1 ? "year" : "years"
+  } ${direction}.`;
 });
 
+/**
+ * The card's itemised rows.
+ *
+ * **BODY is not among them, on the user's call (2026-08-26).** It is by far the
+ * largest term - measured, -15.4 years against -2.7 and +4.9 for the other two -
+ * and a single line reading `BMI 21.2 vs 26.6` invites exactly the question the
+ * card has no room to answer: whether one BMI unit really is worth 2.9 years of
+ * fitness age. It is not hidden, it leads the same itemisation on the
+ * drill-through, where the reference, the cohort and the error bar are all beside
+ * it. See `fitnessAgeBreakdown` for the arithmetic.
+ */
+const CARD_ROWS = ["pa", "restingHr"];
+
 const rows = computed(() =>
-  fitnessAgeBreakdown(props.result).map((row) => ({
-    key: row.key,
-    label: row.label,
-    // Both sides of the comparison, because a reading with no reference beside
-    // it cannot say which way it counted. The unit rides on the reading rather
-    // than on the reference, or the row reads as two different quantities.
-    reading: `${fmt(row.reading)}${row.unit ? ` ${row.unit}` : ""} vs ${fmt(row.referenceValue)}`,
-    years: row.years,
-    yearsText: `${row.years < 0 ? "−" : "+"}${Math.abs(row.years).toFixed(1)}`,
-  }))
+  fitnessAgeBreakdown(props.result)
+    .filter((row) => CARD_ROWS.includes(row.key))
+    .map((row) => ({
+      key: row.key,
+      label: row.label,
+      // Both sides of the comparison, because a reading with no reference beside
+      // it cannot say which way it counted. The unit rides on the reading rather
+      // than on the reference, or the row reads as two different quantities.
+      reading: `${fmt(row.reading)}${row.unit ? ` ${row.unit}` : ""} vs ${fmt(
+        row.referenceValue
+      )}`,
+      years: row.years,
+      yearsText: `${row.years < 0 ? "−" : "+"}${Math.abs(row.years).toFixed(
+        1
+      )}`,
+    }))
 );
 
 function fmt(v) {
@@ -160,7 +219,9 @@ const waiting = computed(() => {
   if (r.state !== "withheld") return "";
   if (r.reason === "calibrating-resting-hr") {
     const left = Math.max(0, PROVISIONAL_MIN_DAYS - (r.days ?? 0));
-    return `Needs ${PROVISIONAL_MIN_DAYS} nights of resting heart rate before it can say anything. ${r.days ?? 0} so far.`;
+    return `Needs ${PROVISIONAL_MIN_DAYS} nights of resting heart rate before it can say anything. ${
+      r.days ?? 0
+    } so far.`;
   }
   if (r.reason === "calibrating-activity") {
     return `Needs ${r.needed} days of activity history. ${r.days ?? 0} so far.`;
@@ -178,7 +239,8 @@ const blockedText = computed(() => {
   const r = props.result;
   const reasons = {
     "no-age": "Add your date of birth in Settings.",
-    "no-sex": "Add your sex in Settings. The model has different coefficients for each.",
+    "no-sex":
+      "Add your sex in Settings. The model has different coefficients for each.",
     "no-body": "Add your height in Settings, and log a weight.",
     "stale-weight": `The last weight is ${r.weightDaysOld} days old. Log a current one.`,
     "no-resting-hr": "No resting heart rate from the strap yet.",
@@ -191,6 +253,36 @@ const blockedText = computed(() => {
 </script>
 
 <style scoped>
+/* The card's last row. Full width and at the app's row height so it is a target
+   rather than a line of text, hairline above because it is a different kind of
+   thing from the readings it follows, and in the family colour so it belongs to
+   this card rather than reading as a generic link. */
+.opener {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--row-h);
+  margin-top: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--panel-line);
+  text-align: left;
+  cursor: pointer;
+}
+.olabel {
+  font-size: var(--fs-label);
+  letter-spacing: 1.6px;
+  color: v-bind("famColor('weight')");
+}
+/* The same chevron the header carries and every openable row in Atlas uses. */
+.ocar {
+  font-size: 19px;
+  line-height: 1;
+  color: var(--dim);
+}
 /* The hero is MetricPage's shape: a bare number at 52px with the qualifier set
    out beside it at 20. Setting the qualifier inside the same string makes a
    visibly different object of the number, which is why they are two spans. */
@@ -221,7 +313,7 @@ const blockedText = computed(() => {
   color: var(--dim);
 }
 .verdict {
-  font-size: 14.5px;
+  font-size: 15.5px;
   line-height: 1.5;
   margin: 11px 0 0;
   color: var(--body);
@@ -267,7 +359,7 @@ const blockedText = computed(() => {
   display: flex;
   justify-content: space-between;
   margin-top: 7px;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -275,7 +367,7 @@ const blockedText = computed(() => {
   display: flex;
   gap: 16px;
   margin-top: 6px;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
@@ -312,7 +404,7 @@ const blockedText = computed(() => {
   align-items: center;
   padding: 9px 0;
   border-top: 1px solid var(--panel-line);
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 0.5px;
 }
 .item:first-child {
@@ -336,5 +428,4 @@ const blockedText = computed(() => {
 .y.up {
   color: var(--rec-low);
 }
-
 </style>

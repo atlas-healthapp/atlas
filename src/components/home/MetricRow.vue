@@ -104,7 +104,7 @@ defineProps({
 }
 .chev {
   color: var(--dim);
-  font-size: 15px;
+  font-size: 16px;
   flex-shrink: 0;
   width: 8px;
   text-align: right;

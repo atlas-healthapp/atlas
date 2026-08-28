@@ -42,73 +42,52 @@
           </div>
         </div>
 
-        <!-- What today is being judged against, as two cells rather than as a
-             list of rows. The rows version separated its entries with hairlines
-             and those read as more axes, sitting directly above a mark that is
-             an axis and a chart that has another. Two facts, deliberately: a
-             third leaves a hole in a two-column grid, and the ones that came
-             out are carried by the chart card below. -->
-        <div v-if="facts.length" class="pairs">
-          <div v-for="f in facts" :key="f.k" class="pair">
-            <div class="k mono">{{ f.k }}</div>
-            <div class="v mono">{{ f.v }}</div>
-          </div>
-        </div>
+        <!-- **The order below was settled on 2026-08-27 and the reasoning is
+             the fold.** Measured on the device, this page put its HISTORY seam
+             at 28% of the first screen on steps and 43% on creatine, so what you
+             landed on was mostly history. The fix was not to spread today out -
+             that was drawn and rejected for looking exactly like what it was -
+             but to give today something to say and then let the seam fall where
+             the content puts it.
 
-        <!-- **Where a hand-entered metric is actually entered.** It was already
-             possible and effectively unreachable: the only way in was to scroll
-             past the chart and the calendar, expand a collapsed EVERY DAY
-             section, find today in a ninety-row list and tap it. Reported as
-             "I cannot add weight anywhere in the app", which was the right
-             description of it.
-
-             Above the mark rather than below, because on a metric with nothing
-             recorded there is no mark, no chart and no hero worth reading, and
-             the only thing the page can usefully offer is the way to fix that.
-             The per-day rows stay where they are; this is for today, which is
-             the day you almost always mean. -->
-        <button v-if="def.editable" type="button" class="logtoday mono" @click="openTodayLog">
-          {{ todayValue == null ? `ADD TODAY'S ${def.label}` : `UPDATE TODAY'S ${def.label}` }}
-        </button>
-
-        <!-- The page's one visual answer to "where does today sit". MetricPage
-             was the only screen in the app using none of the seven marks. -->
-        <div v-if="mark" class="markrow">
-          <GoalBar
-            v-if="mark === 'goal'"
-            :value="todayValue ?? 0"
-            :goal="def.goal"
-            :color="colour"
-          />
-          <!-- The axis is the window's own spread, not the range, so an
-               ordinary day sits mid-axis and an unusual one runs to an end.
-               `rug` draws every prior reading under the line; turning it off
-               is the plainer variant. -->
-          <RangeMark
-            v-else
-            :value="todayValue"
-            :low="range?.low ?? null"
-            :high="range?.high ?? null"
-            :baseline="range?.mean ?? null"
-            :series="priorReadings"
-            :color="colour"
-            :height="24"
-            :low-label="markEnds[0]"
-            :high-label="markEnds[1]"
-          />
-          <!-- The goal bar is scaled from zero to the target, so its ends are
-               the ends of the row. The range mark labels its own, under the
-               band, because its axis is wider than the range. -->
-          <div v-if="mark === 'goal'" class="markends mono">
-            <span>{{ markEnds[0] }}</span><span>{{ markEnds[1] }}</span>
-          </div>
-        </div>
-
+             Hero, then the block that answers today, then the mark, then the
+             ways in, then the reference figures. Reading downward now goes from
+             the narrowest claim to the widest, and the pairs sit last because
+             once a page carries a today block the goal and the average are
+             reference material rather than the headline. -->
         <!-- What the number is made of, or what it sits against. The other four
              drill-throughs all spend most of their first screen on today; this
              page's today was one reading, so history dominated it. -->
+        <!-- **The block that answers today.** Steps and PAI had nothing here at
+             all, which is why their HISTORY seam sat at 28% of the first screen:
+             the page was short because it had nothing to say, not because it was
+             cramped. Only one of these ever renders. -->
         <HomeCard
-          v-if="parts.length"
+          v-if="hasIntraday && intraday"
+          title="TODAY SO FAR"
+          :meta="intradayMeta"
+          :color="colour"
+        >
+          <TodaySoFar :model="intraday" :color="colour" />
+        </HomeCard>
+
+        <HomeCard
+          v-else-if="hasRollingWindow"
+          title="THE SEVEN DAYS BEHIND IT"
+          :meta="`REFERENCE ${PAI_REFERENCE}`"
+          :color="colour"
+        >
+          <RollingWindow
+            :values="rollingWindow"
+            :reference="PAI_REFERENCE"
+            :color="colour"
+            first-label="DROPS OFF TOMORROW"
+            last-label="TODAY"
+          />
+        </HomeCard>
+
+        <HomeCard
+          v-else-if="parts.length"
           title="WHAT WENT INTO IT"
           :meta="`${todayText} / ${display(def.goal)}`"
           :color="colour"
@@ -151,6 +130,116 @@
             >
           </div>
         </HomeCard>
+
+        <!-- The page's one visual answer to "where does today sit". MetricPage
+             was the only screen in the app using none of the seven marks. -->
+        <div v-if="mark" class="markrow">
+          <GoalBar
+            v-if="mark === 'goal'"
+            :value="todayValue ?? 0"
+            :goal="def.goal"
+            :color="colour"
+            :height="16"
+          />
+          <!-- The axis is the window's own spread, not the range, so an
+               ordinary day sits mid-axis and an unusual one runs to an end.
+               `rug` draws every prior reading under the line; turning it off
+               is the plainer variant. -->
+          <RangeMark
+            v-else
+            :value="todayValue"
+            :low="range?.low ?? null"
+            :high="range?.high ?? null"
+            :baseline="range?.mean ?? null"
+            :series="priorReadings"
+            :color="colour"
+            :height="32"
+            :low-label="markEnds[0]"
+            :high-label="markEnds[1]"
+          />
+          <!-- The goal bar is scaled from zero to the target, so its ends are
+               the ends of the row. The range mark labels its own, under the
+               band, because its axis is wider than the range. -->
+          <div v-if="mark === 'goal'" class="markends mono">
+            <span>{{ markEnds[0] }}</span><span>{{ markEnds[1] }}</span>
+          </div>
+        </div>
+
+        <!-- **Where a hand-entered metric is actually entered.** It was already
+             possible and effectively unreachable: the only way in was to scroll
+             past the chart and the calendar, expand a collapsed EVERY DAY
+             section, find today in a ninety-row list and tap it. Reported as
+             "I cannot add weight anywhere in the app", which was the right
+             description of it.
+
+             Above the mark rather than below, because on a metric with nothing
+             recorded there is no mark, no chart and no hero worth reading, and
+             the only thing the page can usefully offer is the way to fix that.
+             The per-day rows stay where they are; this is for today, which is
+             the day you almost always mean. -->
+        <button v-if="def.editable" type="button" class="logtoday mono" @click="openTodayLog">
+          {{ todayValue == null ? `ADD TODAY'S ${def.label}` : `UPDATE TODAY'S ${def.label}` }}
+        </button>
+
+        <!-- **The week, and it sits with the button rather than below the fold.**
+             Today was already one tap; any other day meant scrolling past the
+             chart and the calendar, unfolding EVERY DAY and hunting for it. Both
+             ways in belong together, so this goes directly under the button.
+
+             It is a row of readings, not a second date stepper: the hero, the
+             pairs and the mark above all describe the *window*, and a stepper
+             that retargeted the page would leave them saying one thing while the
+             hero said another. Tapping here opens an editor for that day and
+             changes nothing above it.
+
+             The empty dots are the point. `stripNote` counts what is missing
+             rather than scoring what is present. -->
+        <div v-if="def.editable" class="strip">
+          <div class="striphd mono">
+            <span>THIS WEEK</span>
+            <span v-if="stripNote(strip)" class="stripnote">{{ stripNote(strip) }}</span>
+          </div>
+          <div class="week">
+            <button
+              v-for="d in strip"
+              :key="d.date"
+              type="button"
+              class="day"
+              :class="{ sel: editing === d.date, isnow: d.isToday }"
+              :aria-label="`${dayLabel(d.date)}, ${d.logged ? display(d.value) : 'not logged'}`"
+              :aria-pressed="editing === d.date"
+              :style="editing === d.date ? { borderColor: colour } : {}"
+              @click="toggleEdit(d)"
+            >
+              <span class="dl">{{ d.letter }}</span>
+              <span class="dot" :class="{ on: d.logged }" :style="dotStyle(d)"></span>
+            </button>
+          </div>
+          <!-- Named in full once open: the letters cannot say which Tuesday, and
+               a stepper with no date on it is the one control here that could
+               write to the wrong day without anybody noticing. -->
+          <template v-if="stripEditing">
+            <div class="stripday mono">{{ dayLabel(stripEditing.date) }}</div>
+            <MetricEditRow
+              :def="def"
+              :value="editStartValue"
+              @save="(v) => saveDay(stripEditing.date, v)"
+            />
+          </template>
+        </div>
+
+        <!-- What today is being judged against, as two cells rather than as a
+             list of rows. The rows version separated its entries with hairlines
+             and those read as more axes, sitting directly above a mark that is
+             an axis and a chart that has another. Two facts, deliberately: a
+             third leaves a hole in a two-column grid, and the ones that came
+             out are carried by the chart card below. -->
+        <div v-if="facts.length" class="pairs">
+          <div v-for="f in facts" :key="f.k" class="pair">
+            <div class="k mono">{{ f.k }}</div>
+            <div class="v mono">{{ f.v }}</div>
+          </div>
+        </div>
 
         <div class="grouphd mono" :style="{ color: colour }">HISTORY</div>
 
@@ -456,44 +545,12 @@
               <span v-if="def.editable" class="chev" aria-hidden="true">›</span>
             </div>
 
-            <div v-if="editing === d.date" class="editrow">
-              <span v-if="def.composite" class="editnote mono">
-                MANUAL EXTRA, ON TOP OF WHAT THE DIARY ALREADY COUNTED
-              </span>
-              <div class="stepper">
-                <button
-                  class="step"
-                  type="button"
-                  @click="editVal = Math.max(0, +(editVal - def.step).toFixed(2))"
-                >
-                  −
-                </button>
-                <div class="val mono">
-                  <input
-                    class="valinput"
-                    type="number"
-                    inputmode="decimal"
-                    v-model.number="editVal"
-                    @focus="$event.target.select()"
-                  /><span>{{ def.unit || "" }}</span>
-                </div>
-                <button
-                  class="step"
-                  type="button"
-                  @click="editVal = +(editVal + def.step).toFixed(2)"
-                >
-                  +
-                </button>
-              </div>
-              <!-- The field stays decimal because the stepper is shared with
-                   water, creatine and weight, where a decimal is the natural
-                   unit. But 8.63 is not a duration anybody reads, so the same
-                   number is echoed in hours and minutes underneath it. -->
-              <span v-if="def.format === 'hours'" class="editecho mono">
-                {{ fmtHoursMins(editVal) }}
-              </span>
-              <button class="save mono" type="button" @click="save(d.date)">SAVE</button>
-            </div>
+            <MetricEditRow
+              v-if="editing === d.date"
+              :def="def"
+              :value="editStartValue"
+              @save="(v) => saveDay(d.date, v)"
+            />
           </div>
         </div>
         </details>
@@ -536,18 +593,28 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, shallowRef, computed, onMounted } from "vue";
 import { useCheckinStore } from "@/stores/checkin";
 import { useFoodStore } from "@/stores/food";
 import { useTripsStore } from "@/stores/trips";
 import { useBackClose } from "@/composables/useBackClose";
 import PageHeader from "@/components/layout/PageHeader.vue";
+import MetricEditRow from "./MetricEditRow.vue";
+import { weekStrip, stripNote } from "./weekStrip";
 import HomeCard from "@/components/home/HomeCard.vue";
 import GoalBar from "@/components/marks/GoalBar.vue";
 import RangeMark from "@/components/marks/RangeMark.vue";
 import { partRows, compareRows, recentAverage, previousReading } from "./todayCard";
-import { dailyValuesForRange } from "@/utils/dailyRollup";
-import { today, addDays, fmtHoursMins } from "@/utils/date";
+import { dailyValuesForRange, localDayBounds } from "@/utils/dailyRollup";
+import { getSamples } from "@/utils/sampleDb";
+import {
+  intradayModel,
+  curveFor,
+  USUAL_DAYS,
+} from "@/utils/intradaySteps";
+import TodaySoFar from "@/components/metrics/TodaySoFar.vue";
+import RollingWindow from "@/components/metrics/RollingWindow.vue";
+import { today, addDays } from "@/utils/date";
 import { familyColor } from "@/utils/families";
 import {
   barGeometry,
@@ -565,6 +632,7 @@ import TripLane from "@/components/marks/TripLane.vue";
 import { formatValue } from "@/utils/metricRegistry";
 import {
   isGoalMetric,
+  isBinaryAgainstGoal,
   goalSummary,
   periodStats,
   trendSummary,
@@ -616,6 +684,7 @@ onMounted(async () => {
   const to = today();
   try {
     dayWindow.value = await dailyValuesForRange(addDays(to, -(props.def.window - 1)), to);
+    if (hasIntraday.value) await loadIntraday(to);
   } finally {
     // In `finally`, so a failed read still lets the page say what it knows
     // rather than sitting blank forever.
@@ -684,6 +753,79 @@ function valueOn(dateKey) {
 
 const series = computed(() => days.value.map((d) => d.value));
 const bar = computed(() => barGeometry(series.value, props.def.goal));
+
+/**
+ * Which metrics get a block about today rather than only a figure.
+ *
+ * **Not every metric wants the same one, and two of them wanted opposite
+ * things.** Steps accumulate through the day, so the answer is where today sits
+ * against the shape your own days make. PAI is a rolling seven-day score that
+ * moved one point across an entire day when it was measured, so an intraday
+ * chart of it would be a flat line; what says something there is the window the
+ * score is made of. Everything else already had HOW IT COMPARES or WHAT WENT
+ * INTO IT.
+ */
+const hasIntraday = computed(() => props.def.key === "steps");
+const hasRollingWindow = computed(() => props.def.key === "pai");
+
+/** PAI's fixed reference. It is what the metric is defined around, not a target. */
+const PAI_REFERENCE = 100;
+
+const intraday = shallowRef(null);
+
+/**
+ * Today's samples, and the fortnight before it, as running totals.
+ *
+ * Read straight from the archive rather than from `dayWindow`: a rollup is one
+ * number for the day and the whole question here is what the day looked like on
+ * the way to it. Fifteen local days are fetched in one range and split here,
+ * since one read is cheaper than fifteen.
+ */
+async function loadIntraday(to) {
+  const from = addDays(to, -USUAL_DAYS);
+  const start = localDayBounds(from).start;
+  const end = localDayBounds(to).end;
+  const rows = await getSamples(props.def.key, start, end);
+
+  const byDay = new Map();
+  for (const r of rows) {
+    // Bucketed by the day's own local start, so a DST change neither doubles a
+    // day up nor drops an hour off one - localDayBounds' job, not arithmetic here.
+    const key = new Date(r.t).setHours(0, 0, 0, 0);
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(r);
+  }
+
+  const todayStart = localDayBounds(to).start;
+  const priorCurves = [];
+  for (const [dayStart, samples] of byDay) {
+    if (dayStart >= todayStart) continue;
+    priorCurves.push(curveFor(samples, dayStart));
+  }
+
+  intraday.value = intradayModel({
+    todaySamples: byDay.get(todayStart) ?? [],
+    priorCurves,
+    nowMs: Date.now(),
+    dayStartMs: todayStart,
+    goal: props.def.goal ?? null,
+  });
+}
+
+/** What the card's header says the chart is against, when there is one. */
+const intradayMeta = computed(() => {
+  const m = intraday.value;
+  if (!m?.band) return "";
+  return `USUAL OVER ${m.band.days} DAYS`;
+});
+
+/** The seven days a rolling score is made of, oldest first. */
+const rollingWindow = computed(() => {
+  const to = today();
+  const out = [];
+  for (let i = 6; i >= 0; i -= 1) out.push(valueOn(addDays(to, -i)));
+  return out;
+});
 // The usual range is pulled into the line's scale so the band drawn behind it
 // cannot fall off the top or bottom of its own chart.
 const line = computed(() =>
@@ -933,26 +1075,98 @@ function display(v) {
   return formatValue(props.def, v);
 }
 
-/** Goal metrics are judged against the goal; the rest against their own range. */
+/**
+ * Goal metrics are judged against the goal; the rest against their own range.
+ *
+ * **Rewritten 2026-08-27, and the rule behind the rewrite is that the line can
+ * name the figure it is comparing against.** "Below your usual range for the
+ * last few weeks" sent the reader off to find the range; the page already knew
+ * it. "Past today's target of 8,000" led with the target and buried the fact
+ * that it had been met.
+ *
+ * The voice is unchanged and deliberately not Garmin's: state the reading and
+ * what it is judged against, never how to feel about it and never why health
+ * matters.
+ */
 const verdict = computed(() => {
   const def = props.def;
   const v = todayValue.value;
+
+  if (hasIntraday.value && intraday.value) return intradaySentence(intraday.value, def);
+
   if (v == null) return "Nothing recorded today.";
 
   if (def.goal) {
-    if (v >= def.goal) return `Past today's target of ${display(def.goal)}.`;
-    const left = def.goal - v;
-    return `${display(left)} short of today's target.`;
+    if (v >= def.goal) {
+      const spare = v - def.goal;
+      return spare > 0 ? `Target met, with ${display(spare)} to spare.` : "Target met.";
+    }
+    return `${display(def.goal - v)} short of today's target.`;
   }
 
   // No target, so the only honest comparison is against your own recent
   // readings, and only once enough of them exist to mean something.
   const usual = range.value;
-  if (!usual) return "Still building up a normal range for this.";
-  if (v < usual.low) return "Below your usual range for the last few weeks.";
-  if (v > usual.high) return "Above your usual range for the last few weeks.";
-  return "Inside your usual range for the last few weeks.";
+  // `NotYet`'s rule in a sentence: show the readings that exist rather than a
+  // word for their absence.
+  if (!usual) {
+    const have = series.value.filter((x) => x != null).length;
+    return `${have} ${have === 1 ? "reading" : "readings"} of the ${def.window} it needs before this has a normal range.`;
+  }
+  const band = `your usual ${bare(usual.low)} to ${display(usual.high)}`;
+  if (v < usual.low) return `Below ${band}.`;
+  if (v > usual.high) return `Above ${band}.`;
+  return `Inside ${band}.`;
 });
+
+/**
+ * The steps line, in every state it can be in.
+ *
+ * Two facts in a fixed order: where you are against your own usual for this
+ * hour, then where the day is heading against the target.
+ *
+ * **The pace half is withheld when no goal is set**, because a projection with
+ * nothing to judge it against is a number for its own sake, and the comparison
+ * half is withheld before the usual has moved at all - at 04:00 a median of 18
+ * steps makes "behind" meaningless.
+ *
+ * **Rounding, once, for both halves**: a projection to the nearest hundred and a
+ * median to the nearest ten. Both are built from fourteen days and printing
+ * either to the digit claims a precision neither has.
+ */
+function intradaySentence(m, def) {
+  const r100 = (v) => display(Math.round(v / 100) * 100);
+  const r10 = (v) => display(Math.round(v / 10) * 10);
+  const today = m.total;
+  const usual = m.usualNow;
+  const goal = def.goal ?? null;
+
+  if (today === 0) {
+    if (usual == null || usual <= 60) return "Nothing yet, and nor is there usually this early.";
+    return `Nothing yet. You are usually near ${r10(usual)} by now.`;
+  }
+
+  if (goal && today >= goal) {
+    const spare = today - goal;
+    const met = spare > 0 ? `Target met, with ${display(spare)} to spare.` : "Target met.";
+    return usual != null && usual >= 40
+      ? `${met} Well ahead of your usual ${r10(usual)} by this hour.`
+      : met;
+  }
+
+  let where;
+  if (usual == null || usual < 40) where = `${display(today)} so far.`;
+  else if (today / usual >= 1.25) where = `Ahead of your usual ${r10(usual)} by this hour.`;
+  else if (today / usual >= 0.85) where = "About your usual for this hour.";
+  else where = `Behind your usual ${r10(usual)} by this hour.`;
+
+  // The shortfall is not named: the goal bar directly under this shows the gap,
+  // and saying it spends a clause repeating a mark.
+  if (!goal || m.projected == null) return where;
+  return m.projected >= goal
+    ? `${where} On pace to clear ${display(goal)}.`
+    : `${where} On pace for about ${r100(m.projected)}.`;
+}
 
 /**
  * The usual range, from the readings before today.
@@ -970,7 +1184,9 @@ const bandWord = computed(() => {
   const v = todayValue.value;
   if (v == null) return "NO DATA";
   if (isGoal.value) return v >= props.def.goal ? "MET" : "SHORT";
-  if (!range.value) return "CALIBRATING";
+  // Same state, same words as Home, BODY and FITNESS: a real reading with no
+  // personal normal behind it yet. Three words, so it still fits the slot.
+  if (!range.value) return "BUILDING A RANGE";
   if (v < range.value.low) return "LOW FOR YOU";
   if (v > range.value.high) return "HIGH FOR YOU";
   return "TYPICAL";
@@ -992,9 +1208,20 @@ const facts = computed(() => {
   if (isGoal.value) {
     const s = goalSummary(series.value, props.def.goal);
     if (!s) return [];
+    // **The seven-day average moved up here on 2026-08-27**, and out of the
+    // strip under HISTORY, where it was the same figure said a second time on
+    // the same screen. `MET x / y` went the other way: it survives on the 30-day
+    // cell's own sub-line, which already reads "MET ON n OF m RECORDED".
+    // **The average leads and the goal follows** (2026-08-27, user's call). The
+    // average is a reading and the goal is the thing it is read against, and the
+    // hero directly above is also a reading, so putting the goal first broke the
+    // column the eye was already travelling down.
+    const week = weekAverage.value;
     return [
+      week == null
+        ? { k: "MET", v: `${s.met} / ${s.recorded}` }
+        : { k: "7 DAY AVERAGE", v: formatValue(props.def, week, { average: true }) },
       { k: "GOAL", v: display(props.def.goal) },
-      { k: "MET", v: `${s.met} / ${s.recorded}` },
     ];
   }
   const t = trendSummary(series.value);
@@ -1013,8 +1240,16 @@ const facts = computed(() => {
   return out;
 });
 
+/** The seven-day mean, for the pair at the foot of the today block. */
+const weekAverage = computed(() => {
+  const to = today();
+  const values = [];
+  for (let i = 6; i >= 0; i -= 1) values.push(valueOn(addDays(to, -i)));
+  return periodStats(values, props.def.goal)?.average ?? null;
+});
+
 /**
- * The 7 and 30 day view of a goal metric, for the strip under HISTORY.
+ * The 30 day view of a goal metric, for the strip under HISTORY.
  *
  * Read straight from `valueOn` rather than from `series`, which is trimmed to
  * `def.window` - protein's window is 14 days, and a 30-day average taken from it
@@ -1028,7 +1263,9 @@ const periods = computed(() => {
   if (!isGoal.value) return [];
   const to = today();
   const out = [];
-  for (const days of [7, 30]) {
+  // **7 came out on 2026-08-27.** It is in the pairs above now, and printing it
+  // twice on one screen is how a reader learns to stop reading either copy.
+  for (const days of [30]) {
     const values = [];
     for (let i = days - 1; i >= 0; i -= 1) values.push(valueOn(addDays(to, -i)));
     const s = periodStats(values, props.def.goal);
@@ -1044,7 +1281,7 @@ const periods = computed(() => {
       // "LAST 7 DAYS" over a number is a heading, not a claim, and the reader
       // has to infer which of several possible figures it is.
       label: `${days} DAY AVERAGE`,
-      value: display(Math.round(s.average * 10) / 10),
+      value: formatValue(props.def, s.average, { average: true }),
       // Counted against the days that HAVE a reading, never the length of the
       // period: "12 of 30" would count days you never recorded as days you
       // failed. Saying "of N days recorded" out loud answers the question this
@@ -1094,11 +1331,28 @@ function deltaText(delta) {
   return `${rounded < 0 ? "−" : "+"}${short(Math.abs(rounded))}`;
 }
 
-/** Which mark, or none at all before there is anything for it to say. */
+/**
+ * Which mark, or none at all before there is anything for it to say.
+ *
+ * **A goal metric that is taken-or-not gets no bar** (2026-08-27). See
+ * `isBinaryAgainstGoal`: when every logged reading is either nothing or exactly
+ * the target, the bar has two states and the hero already said which. On
+ * creatine that also stopped the same 5 g being printed three times on one
+ * screen. The week strip below is the right mark for a binary and is already
+ * there, so nothing is lost by dropping this one.
+ */
 const mark = computed(() => {
-  if (isGoal.value) return "goal";
+  if (isGoal.value) return binaryGoal.value ? null : "goal";
   return todayValue.value != null && range.value ? "baseline" : null;
 });
+
+/** Judged over the whole window rather than the week, so one odd day cannot flip it. */
+const binaryGoal = computed(() =>
+  isBinaryAgainstGoal(
+    dayWindow.value.map((d) => valueOn(d.date)),
+    props.def.goal
+  )
+);
 
 const markEnds = computed(() =>
   isGoal.value
@@ -1215,54 +1469,147 @@ async function saveTodayLog(pairs) {
 }
 
 const editing = ref(null);
-const editVal = ref(0);
+
+/**
+ * The last seven days, for the strip under the LOG TODAY button.
+ *
+ * Built from `days`, which is already the window this page draws, so the strip
+ * and the chart can never disagree about whether a day was logged.
+ */
+const strip = computed(() => {
+  const byDate = Object.fromEntries(days.value.map((d) => [d.date, d.value]));
+  return weekStrip(byDate, today());
+});
+
+/** The strip day being edited, or null when the open editor is in EVERY DAY. */
+const stripEditing = computed(
+  () => strip.value.find((d) => d.date === editing.value) ?? null
+);
+
+/**
+ * What the open editor should start from.
+ *
+ * **Composite metrics edit the manual extra alone**, so the field has to start
+ * from that rather than from the diary-inclusive total the row shows. Getting
+ * this wrong would re-log the diary's own contribution as a manual entry and
+ * double the day.
+ */
+const editStartValue = computed(() => {
+  if (!editing.value) return 0;
+  if (props.def.composite) {
+    return checkin.entryFor(editing.value)?.[props.def.key] ?? 0;
+  }
+  return days.value.find((d) => d.date === editing.value)?.value ?? 0;
+});
 
 function toggleEdit(day) {
-  if (editing.value === day.date) {
-    editing.value = null;
-    return;
-  }
-  editing.value = day.date;
-  // Composite metrics edit the manual extra alone, so the field has to start
-  // from that rather than from the diary-inclusive total shown in the row.
-  editVal.value = props.def.composite
-    ? (checkin.entryFor(day.date)?.[props.def.key] ?? 0)
-    : (day.value ?? 0);
+  editing.value = editing.value === day.date ? null : day.date;
 }
 
-function save(dateKey) {
-  checkin.logMetric({ [props.def.key]: editVal.value }, dateKey);
+/**
+ * Write one day, and re-read the window.
+ *
+ * **The re-read is the fix to an existing gap, not scaffolding for the strip.**
+ * `dayWindow` is loaded once on mount, so saving a past day used to leave the
+ * chart, the calendar and the pairs showing the figures the page opened with -
+ * the edit had landed, and nothing on screen said so. `saveTodayLog` already
+ * refreshed for exactly this reason; the per-day path never did.
+ */
+async function saveDay(dateKey, value) {
+  checkin.logMetric({ [props.def.key]: value }, dateKey);
   editing.value = null;
+  const to = today();
+  dayWindow.value = await dailyValuesForRange(addDays(to, -(props.def.window - 1)), to);
+}
+
+/** A logged dot takes the metric's family colour; an empty one stays dim. */
+function dotStyle(day) {
+  return day.logged ? { background: colour.value } : {};
 }
 </script>
 
 <style scoped>
-.page {
-  position: fixed;
-  inset: 0;
-  z-index: 600;
+/* The week strip. Sits with the LOG TODAY button above it, so the two ways of
+   entering a reading read as one group rather than as a control and a chart. */
+.strip {
+  margin-top: 14px;
+}
+.striphd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  letter-spacing: 2px;
+  color: var(--dim);
+  margin-bottom: 7px;
+}
+/* The one thing on the strip worth acting on, so it is the one thing coloured.
+   `--bad` would read as a fault; a missed day is a gap, not an error. */
+.stripnote {
+  letter-spacing: 1.2px;
+  color: var(--acc);
+}
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+/* 44px is the app's touch minimum and seven of these across a phone is about
+   44 wide, so the row is at the floor in both directions. */
+.day {
   display: flex;
   flex-direction: column;
-  background: var(--bg1);
-  color: var(--body);
-  font-family: var(--font-sans);
-  /* Safe-area padding on the shell, never on the scrolling child: on the child
-     the inset scrolls away and the header rides up under the status icons. */
-  padding: calc(12px + env(safe-area-inset-top)) 18px
-    calc(20px + env(safe-area-inset-bottom));
-  overflow: hidden;
-  animation: pagein 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 7px 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
 }
-@keyframes pagein {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
+.day .dl {
+  font-size: var(--fs-micro);
+  letter-spacing: 1px;
+  color: var(--dim);
+  font-family: var(--font-mono);
 }
-@media (prefers-reduced-motion: reduce) {
-  .page {
-    animation: none;
-  }
+.day .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--dim) 28%, transparent);
+}
+/* Today is marked whether or not it is selected, because the strip has no dates
+   on it and the right-hand end is the only thing that says where you are.
+
+   **`.isnow`, not `.today`.** This file already has a `.today` - the 52px hero
+   block at the top - and a scoped block ADDS to a class rather than replacing
+   it, so the strip cell inherited its `align-items: flex-start` and its
+   `margin-bottom: 16px`. Measured on the live DOM: the cell came out 55px tall
+   against its siblings' 71 (71 minus the 16 of margin) with its letter and dot
+   pushed to the left edge. Exactly the defect the alarm panel's `.grouphd` hit
+   on 2026-08-25, one file lower down. */
+.day.isnow .dl {
+  color: var(--ink);
+}
+/* The border colour is bound to the metric's own family, not to `currentColor`:
+   inherited here that resolves to the page's text colour and drew a grey box
+   round a blue dot. */
+.day.sel {
+  background: color-mix(in srgb, var(--dim) 10%, transparent);
+}
+.day.sel .dl {
+  color: var(--ink);
+}
+/* The date in full once a day is open: seven letters cannot say which Tuesday,
+   and this is the control that could otherwise write to the wrong day. */
+.stripday {
+  margin-top: 12px;
+  font-size: var(--fs-label);
+  letter-spacing: 1.6px;
+  color: var(--ink);
 }
 .pscroll {
   flex: 1;
@@ -1308,7 +1655,7 @@ function save(dateKey) {
 }
 /* 12px at 2px tracking, which is what Sleep, Stress and Recovery all use. */
 .band {
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
 }
 .verdict {
@@ -1342,21 +1689,22 @@ function save(dateKey) {
   border-radius: 10px;
 }
 .plabel {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.4px;
   color: var(--dim);
 }
 .pvalue {
-  font-size: 17px;
+  font-size: 18px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
 .psub {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1px;
   color: var(--dim);
 }
 .pairs {
+  margin-top: 30px;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 1px;
@@ -1365,17 +1713,21 @@ function save(dateKey) {
   overflow: hidden;
 }
 .pair {
+  /* Centred since 2026-08-27, matching DiaryView's three macro tiles, which have
+     always been. Left-aligned they read as two rows of a table; centred they
+     read as two readouts, which is what they are. */
+  text-align: center;
   background: var(--bg1);
   padding: 9px 12px 10px;
   min-width: 0;
 }
 .pair .k {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.4px;
   color: var(--dim);
 }
 .pair .v {
-  font-size: 16px;
+  font-size: 17px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   margin-top: 3px;
@@ -1397,7 +1749,7 @@ function save(dateKey) {
   border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
   border-radius: 8px;
   color: v-bind(colour);
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.4px;
   cursor: pointer;
 }
@@ -1405,13 +1757,15 @@ function save(dateKey) {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
+/* 18px was set when the today block was four elements sharing a screen with the
+   history under it. It is not, any more. */
 .markrow {
-  margin-top: 18px;
+  margin-top: 30px;
 }
 .markends {
   display: flex;
   justify-content: space-between;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
   padding-top: 7px;
@@ -1445,7 +1799,7 @@ function save(dateKey) {
   flex: none;
 }
 .tsub {
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
 }
@@ -1506,7 +1860,7 @@ function save(dateKey) {
 .cmprow .v em {
   font-style: normal;
   color: var(--dim);
-  font-size: 10px;
+  font-size: 13px;
   margin-left: 5px;
 }
 
@@ -1537,7 +1891,7 @@ function save(dateKey) {
   left: 0;
   width: 27px;
   text-align: right;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 0.6px;
   color: var(--dim);
   transform: translateY(-50%);
@@ -1555,7 +1909,7 @@ function save(dateKey) {
   justify-content: space-between;
   align-items: baseline;
   gap: 10px;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.2px;
   color: var(--dim);
   padding-bottom: 8px;
@@ -1673,7 +2027,7 @@ function save(dateKey) {
 }
 .chev {
   color: var(--dim);
-  font-size: 15px;
+  font-size: 16px;
   width: 8px;
   text-align: right;
   flex-shrink: 0;
@@ -1886,7 +2240,7 @@ function save(dateKey) {
   gap: 8px;
 }
 .infodetail-hd {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.4px;
   color: var(--dim);
 }

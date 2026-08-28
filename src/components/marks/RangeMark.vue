@@ -163,7 +163,7 @@ const markColor = computed(() => (geo.value?.outside ? "var(--bad)" : props.colo
 .ends span {
   position: absolute;
   white-space: nowrap;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
 }

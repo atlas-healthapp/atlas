@@ -362,7 +362,7 @@ function finish() {
   background: none;
   border: 0;
   color: var(--dim);
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.8px;
   cursor: pointer;
 }
@@ -413,7 +413,7 @@ function finish() {
   background: color-mix(in srgb, var(--acc) 10%, transparent);
 }
 .unitbtn .uname {
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 1.6px;
   color: var(--ink);
 }
@@ -421,7 +421,7 @@ function finish() {
   color: var(--acc);
 }
 .unitbtn .usub {
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
 }
@@ -456,7 +456,7 @@ function finish() {
   min-width: 0;
 }
 .blabel {
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.4px;
   color: var(--dim);
 }
@@ -486,7 +486,7 @@ function finish() {
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
   pointer-events: none;
@@ -536,14 +536,14 @@ function finish() {
   border: 1px solid var(--dim);
   color: var(--ink);
   font-family: inherit;
-  font-size: 17px;
+  font-size: 18px;
 }
 .field:focus {
   outline: none;
   border-color: var(--acc);
 }
 .hint {
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1px;
   line-height: 1.7;
   color: var(--dim);
@@ -561,7 +561,7 @@ function finish() {
   border: 1px solid var(--dim);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 2px;
   cursor: pointer;
 }

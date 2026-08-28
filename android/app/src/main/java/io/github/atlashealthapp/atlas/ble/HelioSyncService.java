@@ -23,6 +23,11 @@ import io.github.atlashealthapp.atlas.R;
 
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
@@ -78,10 +83,56 @@ public class HelioSyncService extends Service {
      * events, two channels, so either can be silenced without the other.
      */
     private static final String CHANNEL_SESSION_LIVE = "helio_session_live";
+    /**
+     * A new version of Atlas is available.
+     *
+     * <p>Its own channel so it can be silenced without silencing anything that
+     * is about your body. An update is an offer rather than a fault, which is
+     * also why this is IMPORTANCE_DEFAULT and not HIGH: it may peek, it does not
+     * demand.
+     */
+    private static final String CHANNEL_UPDATE = "atlas_update";
     private static final int NOTIFICATION_ID = 4711;
     private static final int NOTIFICATION_ID_BATTERY = 4712;
     private static final int NOTIFICATION_ID_SESSION = 4713;
     private static final int NOTIFICATION_ID_SESSION_LIVE = 4714;
+    private static final int NOTIFICATION_ID_UPDATE = 4715;
+
+    /**
+     * The version this has already told you about.
+     *
+     * <p><b>Once per version, not once per tick.</b> The service runs every half
+     * hour and the update sits there until you act on it, so anything keyed on
+     * "is there an update" rather than "have I said so" would post the same
+     * sentence forty-eight times a day. Recorded in prefs rather than a field
+     * because the case this exists for often outlives the process.
+     */
+    private static final String KEY_UPDATE_ANNOUNCED = "update_announced";
+
+    /**
+     * Where the app mirrors what `updateCheck.js` found. See nativeSummary.js.
+     *
+     * <p>The fallback now rather than the source: this service asks GitHub for
+     * itself, because a mirror is only written while Atlas is open and the person
+     * this notification exists for is the one who has not opened it.
+     */
+    private static final String UPDATE_AVAILABLE_KEY = "atlas_update_native";
+
+    /** The releases API, same public endpoint updateCheck.js reads. */
+    private static final String LATEST_RELEASE_URL =
+            "https://api.github.com/repos/atlas-healthapp/atlas/releases/latest";
+
+    /** When this last asked, so it does not behave like a poller. */
+    private static final String KEY_UPDATE_CHECKED = "update_checked_at";
+
+    /**
+     * How often this may ask. Six hours, the same window updateCheck.js uses, so
+     * a release published in the morning is offered by the evening.
+     */
+    private static final long UPDATE_CHECK_INTERVAL_MS = 6L * 60 * 60 * 1000;
+
+    /** Give up rather than hold a thread open on a dead network. */
+    private static final int UPDATE_TIMEOUT_MS = 8000;
 
     /**
      * Alert below this, clear above the higher one. The gap is deliberate: a
@@ -169,6 +220,31 @@ public class HelioSyncService extends Service {
      * it twice.
      */
     static final String KEY_LAST_SESSION_SEEN = "last_session_seen";
+
+    /**
+     * How many runs in a row have reached nothing.
+     *
+     * In prefs rather than in a field, because the case this exists for often
+     * ends with the process being replaced: the count has to survive that or the
+     * backoff resets to two minutes every time and becomes a retry storm.
+     */
+    static final String KEY_FAILED_RUNS = "failed_runs";
+
+    /**
+     * How long to wait after a run that could not reach the band.
+     *
+     * **The band takes one central at a time**, so anybody using the Zepp app
+     * locks Atlas out for as long as they are in it. The tick books
+     * {@code interval()} unconditionally, which meant a link-busy failure cost a
+     * full thirty-minute cycle - and somebody spending twenty minutes in Zepp
+     * could lose two. These are all shorter than an ordinary interval on
+     * purpose, so a retry can only ever bring the next run forward.
+     *
+     * It gives up after three and lets the ordinary cadence take over: a band
+     * that is out of range or flat is not going to answer, and a service that
+     * kept asking would spend the phone's battery to find that out.
+     */
+    private static final long[] RETRY_DELAYS_MS = {2 * 60_000L, 5 * 60_000L, 12 * 60_000L};
 
     /**
      * Set the moment an alarm-window booking has to fall back to an inexact
@@ -393,6 +469,19 @@ public class HelioSyncService extends Service {
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
+            // **First, before anything reads the alarm keys.** Several alarms
+            // live in the plan and only one of them is tonight's; this writes
+            // that one into the keys SmartAlarm has always read. Running it
+            // every tick is what keeps it right across midnight without
+            // anything having to notice midnight happened.
+            AlarmPlan.resolveActive(prefs(), System.currentTimeMillis());
+            // **Before the sync, and not inside it.** Whether a newer Atlas
+            // exists has nothing to do with whether the band answered: gating it
+            // on a completed fetch would mean somebody whose strap is flat, out
+            // of range, or busy in Zepp never hears about a release. It reads a
+            // value the app already wrote, so it costs nothing when there is
+            // nothing to say.
+            announceUpdate();
             runSync();
             scheduleNext(interval());
         }
@@ -430,6 +519,33 @@ public class HelioSyncService extends Service {
      * <p>The handler is kept only for the immediate first run at startup, where
      * the device is by definition awake.
      */
+    /**
+     * Bring the next run forward after one that reached nothing.
+     *
+     * Books over the ordinary tick, which {@link #tick} has already scheduled by
+     * the time this runs - {@link #scheduleNext} cancels before it books, so the
+     * later call wins and the shorter delay stands. Once the retries are spent
+     * the ordinary booking is left alone rather than replaced, so the cadence
+     * simply resumes.
+     *
+     * **The outcome is trailed, not just the decision.** That is the lesson the
+     * smart alarm cost three weeks to learn: a decision written down with no
+     * result beside it cannot tell a run that never happened from one that chose
+     * not to fire.
+     */
+    private void retrySooner(final String reason) {
+        final int failed = prefs().getInt(KEY_FAILED_RUNS, 0);
+        final long now = System.currentTimeMillis();
+        if (failed >= RETRY_DELAYS_MS.length) {
+            trail(now, "retry spent after " + failed + ": " + reason);
+            return;
+        }
+        prefs().edit().putInt(KEY_FAILED_RUNS, failed + 1).apply();
+        final long delay = Math.min(RETRY_DELAYS_MS[failed], interval());
+        trail(now, "retry in " + (delay / 60_000L) + "m (" + (failed + 1) + "): " + reason);
+        scheduleNext(delay);
+    }
+
     private void scheduleNext(final long delayMs) {
         final AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
         if (am == null) {
@@ -618,6 +734,77 @@ public class HelioSyncService extends Service {
         return true;
     }
 
+    /**
+     * Record one look inside the window against this morning's log entry.
+     *
+     * <p>Everything here is already known at this point in {@link
+     * #maybeWakeEarly}; the value is that it survives. The tick trail keeps
+     * about a day and a half of everything, and a morning is answerable weeks
+     * later - which is the case whenever somebody else's phone is the one
+     * being asked about.
+     *
+     * <p>The heart-rate figures ride along as <b>evidence only</b>. Nothing
+     * branches on them, and {@link SleepFromHeartRate} says at length why not.
+     * They are here because the measurement that would settle it can only be
+     * taken on the mornings it applies to, and those are rare.
+     */
+    private void noteWindowCheck(
+            final long now, final int stage, final long stale, final boolean spent) {
+        final java.util.Map<String, String> fields = new java.util.LinkedHashMap<>();
+        fields.put(AlarmLog.F_MODE, prefs().getString(SmartAlarm.KEY_MODE, "fixed"));
+        final int hour = SmartAlarm.hardHour(prefs());
+        if (hour >= 0) {
+            fields.put(
+                    AlarmLog.F_SET,
+                    String.format(
+                            java.util.Locale.US, "%02d:%02d", hour, SmartAlarm.hardMinute(prefs())));
+        }
+        final String day = SmartAlarm.dayKey(now);
+        final String seen = AlarmLog.field(AlarmLog.forDay(prefs(), day), AlarmLog.F_CHECKS);
+        int checks = 1;
+        try {
+            if (seen != null) checks = Integer.parseInt(seen) + 1;
+        } catch (final NumberFormatException ignored) {
+            // A corrupt count is not a reason to lose the rest of the record.
+        }
+        fields.put(AlarmLog.F_CHECKS, String.valueOf(checks));
+        // **Only until it has fired.** The record should hold the look that
+        // DECIDED, not the last one of the morning. Measured on 2026-08-25: the
+        // 08:40 check found light sleep and fired, then the 08:50 check came
+        // back with nothing and overwrote stage=4 with stage=-1 - so a morning
+        // that worked perfectly read back as though the strap had said nothing.
+        if (!spent) {
+            fields.put(AlarmLog.F_STAGE, String.valueOf(stage));
+            fields.put(AlarmLog.F_STALE, String.valueOf(stale));
+            fields.put(AlarmLog.F_SESSIONS, String.valueOf(sleepSessions.size()));
+        }
+        // Only worth recording when the band could not answer, which is the
+        // only situation the fallback would ever have been consulted in.
+        if (stage < 0) {
+            fields.put(
+                    AlarmLog.F_HR,
+                    SleepFromHeartRate.verdict(samples, publishedRestingHr(), now).summary());
+        }
+        // `source` is set by the fire itself and says what the decision was made
+        // from. Overwriting it here with "already fired" threw that away on the
+        // very mornings it worked.
+        AlarmLog.note(prefs(), day, fields);
+    }
+
+    /**
+     * The resting rate the app last published, or 0 when it has not.
+     *
+     * <p>Read from the app's mirror rather than computed here for the reason
+     * {@code nativeSummary.js} exists: two implementations of one figure is how
+     * a surface ends up disagreeing with the screen it mirrors, and this
+     * service cannot reach the archive the app derives it from.
+     */
+    private double publishedRestingHr() {
+        final JSONObject summary = summary();
+        if (summary == null) return 0;
+        return summary.optDouble("restingHr", 0);
+    }
+
     private void maybeWakeEarly() {
         final long now = System.currentTimeMillis();
         // Recorded before the decision, and only inside the window, so the
@@ -632,11 +819,15 @@ public class HelioSyncService extends Service {
             // enough, and `stale=-1` with sessions present is blobs that could
             // not be read. `fired` catches the fourth case, a window that was
             // already spent earlier the same morning.
-            trail(now, "in-window stage=" + SmartAlarm.currentStage(sleepSessions, now)
+            final int stage = SmartAlarm.currentStage(sleepSessions, now);
+            final long stale = SmartAlarm.readingAgeMinutes(sleepSessions, now);
+            final boolean spent = SmartAlarm.dayKey(now)
+                    .equals(prefs().getString(SmartAlarm.KEY_FIRED_ON, null));
+            trail(now, "in-window stage=" + stage
                     + " sessions=" + sleepSessions.size()
-                    + " stale=" + SmartAlarm.readingAgeMinutes(sleepSessions, now)
-                    + " fired=" + (SmartAlarm.dayKey(now)
-                            .equals(prefs().getString(SmartAlarm.KEY_FIRED_ON, null)) ? 1 : 0));
+                    + " stale=" + stale
+                    + " fired=" + (spent ? 1 : 0));
+            noteWindowCheck(now, stage, stale, spent);
         }
         if (!SmartAlarm.shouldWakeNow(prefs(), sleepSessions, now)) return;
 
@@ -646,7 +837,10 @@ public class HelioSyncService extends Service {
         try {
             final byte[] payload =
                     HelioAlarm.create(
-                            0,
+                            // Tonight's alarm owns a slot of its own now, and
+                            // writing 0 would overwrite whichever alarm happens
+                            // to be first in the list.
+                            AlarmPlan.activeSlot(prefs()),
                             at.get(Calendar.HOUR_OF_DAY),
                             at.get(Calendar.MINUTE),
                             true,
@@ -663,6 +857,16 @@ public class HelioSyncService extends Service {
             // write that half succeeds still leaves the debt recorded.
             SmartAlarm.markRearmOwed(prefs(), at.getTimeInMillis());
             trail(now, "FIRING at " + stamp(at.getTimeInMillis()));
+            final java.util.Map<String, String> fired = new java.util.LinkedHashMap<>();
+            fired.put(
+                    AlarmLog.F_FIRED,
+                    String.format(
+                            java.util.Locale.US,
+                            "%02d:%02d",
+                            at.get(Calendar.HOUR_OF_DAY),
+                            at.get(Calendar.MINUTE)));
+            fired.put(AlarmLog.F_SOURCE, "band");
+            AlarmLog.note(prefs(), SmartAlarm.dayKey(now), fired);
             alarmWriteInFlight = sendAlarm(payload, "FIRE");
         } catch (final Exception e) {
             // Nothing to recover: the strap keeps the time already on it.
@@ -689,7 +893,10 @@ public class HelioSyncService extends Service {
         try {
             final byte[] payload =
                     HelioAlarm.create(
-                            0,
+                            // Tonight's alarm owns a slot of its own now, and
+                            // writing 0 would overwrite whichever alarm happens
+                            // to be first in the list.
+                            AlarmPlan.activeSlot(prefs()),
                             at.get(Calendar.HOUR_OF_DAY),
                             at.get(Calendar.MINUTE),
                             true,
@@ -699,6 +906,7 @@ public class HelioSyncService extends Service {
             // Owed back from when this one goes off, which may be hours away.
             SmartAlarm.markRearmOwed(prefs(), target);
             trail(now, "RETIME to " + stamp(target));
+            AlarmLog.note(prefs(), SmartAlarm.dayKey(now), AlarmLog.F_RETIME, stamp(target));
             alarmWriteInFlight = sendAlarm(payload, "RETIME");
         } catch (final Exception e) {
             // The cap the user set is still on the strap. Nothing to recover.
@@ -746,7 +954,10 @@ public class HelioSyncService extends Service {
         try {
             final byte[] payload =
                     HelioAlarm.create(
-                            0,
+                            // Tonight's alarm owns a slot of its own now, and
+                            // writing 0 would overwrite whichever alarm happens
+                            // to be first in the list.
+                            AlarmPlan.activeSlot(prefs()),
                             hour,
                             SmartAlarm.hardMinute(prefs()),
                             true,
@@ -859,6 +1070,9 @@ public class HelioSyncService extends Service {
         return value.isEmpty() || "null".equals(value) ? null : value;
     }
 
+    /** Whether the run now finishing got as far as a completed fetch. */
+    private boolean fetchCompleted;
+
     private void runSync() {
         if (syncing) {
             return;
@@ -888,6 +1102,7 @@ public class HelioSyncService extends Service {
         }
 
         syncing = true;
+        fetchCompleted = false;
         samples.clear();
         sleepSessions.clear();
         workouts.clear();
@@ -922,6 +1137,14 @@ public class HelioSyncService extends Service {
             public void onAlarmSet(final boolean accepted, final int status) {
                 final long now = System.currentTimeMillis();
                 trail(now, "ALARM " + (accepted ? "accepted" : "refused status " + status));
+                // Which write this answers is the difference between "your
+                // alarm went off early" and "your alarm was put back", and the
+                // morning log has a separate field for each.
+                AlarmLog.note(
+                        prefs(),
+                        SmartAlarm.dayKey(now),
+                        rearmInFlight ? AlarmLog.F_REARM : AlarmLog.F_ACK,
+                        accepted ? "ok" : "refused " + status);
                 if (rearmInFlight && accepted) {
                     // Only a re-arm clears the debt, and only when accepted. An
                     // early wake produces one of these too, and taking that as
@@ -939,6 +1162,25 @@ public class HelioSyncService extends Service {
                     finish();
                 }
             }
+
+            /**
+             * What the band says its own workout detection is set to.
+             *
+             * <p>Stored rather than acted on. A Sunday walk left no record
+             * because Zepp had this on Low, and Atlas could not see it - so the
+             * whole value here is being able to say so. These settings are
+             * shared with Zepp, which is why the read exists before any write:
+             * anything set there is invisible here otherwise.
+             */
+            @Override
+            public void onBandConfig(final byte groupVersion, final int sensitivity, final Boolean alert) {
+                prefs().edit()
+                        .putInt(KEY_DETECTION_SENSITIVITY, sensitivity)
+                        .putInt(KEY_DETECTION_GROUP_VERSION, groupVersion & 0xff)
+                        .putInt(KEY_DETECTION_ALERT, alert == null ? -1 : (alert ? 1 : 0))
+                        .apply();
+            }
+
 
             @Override
             public void onBattery(final int levelPercent, final boolean charging) {
@@ -1001,7 +1243,11 @@ public class HelioSyncService extends Service {
 
             @Override
             public void onFetchComplete() {
-                prefs().edit().putLong(KEY_LAST_SYNC, System.currentTimeMillis()).apply();
+                fetchCompleted = true;
+                prefs().edit()
+                        .putLong(KEY_LAST_SYNC, System.currentTimeMillis())
+                        .putInt(KEY_FAILED_RUNS, 0)
+                        .apply();
                 finish();
             }
 
@@ -1009,6 +1255,9 @@ public class HelioSyncService extends Service {
             public void onClosed(final String reason) {
                 // A close before the fetch completes still leaves whatever
                 // arrived worth keeping, so it is cached rather than dropped.
+                if (!fetchCompleted) {
+                    retrySooner(reason);
+                }
                 finish();
             }
         }, key);
@@ -1016,11 +1265,29 @@ public class HelioSyncService extends Service {
         link.connect(SYNC_DAYS);
     }
 
+    /** The band's own UTC offset against the phone's, in minutes. */
+    static final String KEY_BAND_OFFSET = "band_utc_offset_minutes";
+
+    // The band's workout detection, as IT reports it. -1 everywhere means the
+    // band has not answered, which is a different claim from any real value.
+    static final String KEY_DETECTION_SENSITIVITY = "band_detection_sensitivity";
+    static final String KEY_DETECTION_ALERT = "band_detection_alert";
+    /** Sent back verbatim by any later write, so it is stored not assumed. */
+    static final String KEY_DETECTION_GROUP_VERSION = "band_detection_group_version";
+
     private void finish() {
         if (!syncing) {
             return;
         }
         syncing = false;
+        // What zone the band thinks it is in. Atlas cannot set its clock, but a
+        // strap left in another zone rings every alarm at the wrong local time,
+        // and this is the only evidence that has happened.
+        if (HelioFetch.lastReportedOffsetMinutes != Integer.MIN_VALUE) {
+            prefs().edit()
+                    .putInt(KEY_BAND_OFFSET, HelioFetch.lastReportedOffsetMinutes)
+                    .apply();
+        }
         // Before the cache, and outside its try: the probe is measuring what the
         // band handed over on this run, and a caching failure would otherwise
         // lose the observation along with the data.
@@ -1405,6 +1672,28 @@ public class HelioSyncService extends Service {
      * announced here later. Closing that needs the app to publish its newest
      * workout start in the summary and this to take it as a floor.
      */
+    /**
+     * The newest workout the app itself has stored, or 0 if it has never said.
+     *
+     * Its own key rather than a field on the summary: the summary is Home's
+     * snapshot and is republished wholesale on every foreground, so a value
+     * written into it by one side is overwritten by the other's next publish -
+     * which is exactly what made hrNow disagree between here and the app.
+     */
+    private long appWorkoutFloor() {
+        try {
+            final String raw = getSharedPreferences("CapacitorStorage", MODE_PRIVATE)
+                    .getString("atlas_workout_floor_native", null);
+            if (raw == null || raw.isEmpty()) return 0L;
+            return Long.parseLong(raw.trim());
+        } catch (final Exception e) {
+            // A malformed floor is no floor. Announcing one session twice is a
+            // far smaller cost than a parse throwing inside a foreground
+            // service, which Android answers by killing the process.
+            return 0L;
+        }
+    }
+
     private void announceSessions() {
         if (workouts.isEmpty()) {
             return;
@@ -1413,13 +1702,28 @@ public class HelioSyncService extends Service {
         long newest = 0;
         HelioFetch.Workout latest = null;
         int landed = 0;
-        final long seen = prefs().getLong(KEY_LAST_SESSION_SEEN, 0);
+        // **The app's own fetches count as seen.** This service watermarks what
+        // it has announced but can only see its own runs, so a session collected
+        // by a foreground sync - a pull-to-refresh - used to be announced here
+        // later as news for something already on screen, while the pull itself
+        // announced nothing because only this service can post. Measured on the
+        // device 2026-08-27: a session pulled in at 21:18 sat behind a watermark
+        // still reading 13:41 with the next tick due at 21:35. The app writes
+        // its newest stored workout to atlas_workout_floor_native and this takes
+        // the later of the two.
+        final long seen = Math.max(prefs().getLong(KEY_LAST_SESSION_SEEN, 0), appWorkoutFloor());
 
         for (final HelioFetch.Workout w : workouts) {
+            // **The watermark counts every record, announcing skips the noise.**
+            // A session excluded from the announcement still has to move `newest`
+            // or it would be reconsidered on every run for good. When everything
+            // new is noise, `latest` stays null and the guard below returns after
+            // the watermark is written, which is exactly right: nothing to say,
+            // and nothing left to re-ask about.
             if (w.startMillis > newest) {
                 newest = w.startMillis;
             }
-            if (w.startMillis > seen) {
+            if (w.startMillis > seen && !isDetectionNoise(w)) {
                 landed++;
                 if (latest == null || w.startMillis > latest.startMillis) {
                     latest = w;
@@ -1452,6 +1756,47 @@ public class HelioSyncService extends Service {
                         .setContentIntent(open)
                         .setAutoCancel(true)
                         .build());
+    }
+
+    /**
+     * How short a band-detected session may be before it is treated as noise.
+     *
+     * <p><b>The Java twin of MIN_AUTO_SESSION_SECONDS in resolveSessions.js, and
+     * change-both-or-neither.</b> The app hides these from the list, the week
+     * chart, the month totals and Recovery's day markers; this service posted a
+     * notification about them anyway, so the phone announced a three-minute
+     * session that could not be found anywhere in the app when you opened it.
+     * Reported 2026-08-28. `autoSessionFloorTwin.test.js` reads this file and
+     * fails if the two numbers stop agreeing.
+     */
+    static final int MIN_AUTO_SESSION_SECONDS = 5 * 60;
+
+    /**
+     * Whether a freshly arrived record is the band guessing rather than
+     * something you did.
+     *
+     * <p>Deliberately a smaller rule than the app's. `isDetectionNoise` in
+     * resolveSessions.js also spares anything you have named, noted, retimed or
+     * duration-corrected - but those are annotations, and a record this service
+     * has only just pulled off the band cannot carry one yet. The two conditions
+     * that CAN be true here are the same two: a session that was not auto
+     * detected was one you started deliberately, and a record with no recorded
+     * duration is not evidence of being short.
+     *
+     * <p>Static and package-visible so it can be tested without standing up a
+     * Service, the same split HelioAlarm uses.
+     */
+    static boolean isDetectionNoise(final HelioFetch.Workout w) {
+        if (w == null) {
+            return false;
+        }
+        if (!w.typeAutoDetected) {
+            return false;
+        }
+        if (w.activeSeconds == null || w.activeSeconds <= 0) {
+            return false;
+        }
+        return w.activeSeconds < MIN_AUTO_SESSION_SECONDS;
     }
 
     /** "17:33-20:31 · 2h 58m · tap to name it" */
@@ -1564,6 +1909,157 @@ public class HelioSyncService extends Service {
         live.enableVibration(false);
         live.setShowBadge(false);
         getSystemService(NotificationManager.class).createNotificationChannel(live);
+
+        // Separate again, so somebody who wants their readings but not release
+        // announcements can turn exactly that off. DEFAULT rather than LOW
+        // because a silent entry in the shade is the thing this was built to stop
+        // being: the in-app flag already exists and was judged too quiet.
+        final NotificationChannel update = new NotificationChannel(
+                CHANNEL_UPDATE, "Updates", NotificationManager.IMPORTANCE_DEFAULT);
+        update.setDescription("Tells you once when a new version of Atlas is out");
+        getSystemService(NotificationManager.class).createNotificationChannel(update);
+    }
+
+    /**
+     * Say once that a newer Atlas exists.
+     *
+     * <p><b>The app decides, this only says it.</b> `updateCheck.js` asks GitHub
+     * on its own schedule and mirrors the answer to `atlas_update_native`; making
+     * a second request from here would be a second opinion about what counts as
+     * newer, and two surfaces disagreeing about whether there is an update is
+     * worse than not having this at all.
+     *
+     * <p>It cannot install anything. Atlas is a sideloaded APK, so tapping opens
+     * the app, and Settings carries the version and the link. The notification's
+     * whole job is to make you look.
+     */
+    private void announceUpdate() {
+        // The app's mirror first: it costs nothing, and it is already right if
+        // Atlas has been opened since the release.
+        announceIfNewer(getSharedPreferences("CapacitorStorage", MODE_PRIVATE)
+                .getString(UPDATE_AVAILABLE_KEY, null));
+
+        final long now = System.currentTimeMillis();
+        if (now - prefs().getLong(KEY_UPDATE_CHECKED, 0) < UPDATE_CHECK_INTERVAL_MS) {
+            return;
+        }
+        // **Stamped before the request, not after it.** A failed ask therefore
+        // costs one window rather than retrying on every tick for as long as the
+        // network is down, which on a phone in a tunnel is the difference between
+        // four requests a day and forty-eight.
+        prefs().edit().putLong(KEY_UPDATE_CHECKED, now).apply();
+
+        // **Its own thread, and this is not optional.** `tick` runs on the main
+        // looper, so a request made inline throws NetworkOnMainThreadException,
+        // and an uncaught throw inside a foreground service is Android killing
+        // the process. NotificationManager.notify is safe from any thread, so the
+        // result needs no hop back.
+        new Thread(() -> announceIfNewer(UpdateCheck.tagFromJson(fetchLatestRelease())),
+                "atlas-update-check").start();
+    }
+
+    /**
+     * The releases API's reply, or null for any reason at all.
+     *
+     * <p>Exactly what {@code updateCheck.js} sends, and worth being as precise
+     * about: a GET to a public endpoint for a public repository, with no query
+     * string, no body, no identifier and no account. Nothing about the phone or
+     * the person holding it leaves here.
+     */
+    private String fetchLatestRelease() {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(LATEST_RELEASE_URL).openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(UPDATE_TIMEOUT_MS);
+            connection.setReadTimeout(UPDATE_TIMEOUT_MS);
+            connection.setRequestProperty("Accept", "application/vnd.github+json");
+            if (connection.getResponseCode() != 200) {
+                return null;
+            }
+            final StringBuilder body = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                // Capped rather than read to the end. A release body can run to
+                // several screens and the only field wanted is near the top; this
+                // is a background service, not a downloader.
+                while ((line = reader.readLine()) != null && body.length() < 64_000) {
+                    body.append(line);
+                }
+            }
+            return body.toString();
+        } catch (final Exception e) {
+            // Offline, rate limited, DNS gone, GitHub having a bad day. Not
+            // knowing whether an update exists is the normal state, not a fault.
+            android.util.Log.w("HelioBle", "[bg] update check failed: " + e);
+            return null;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    /**
+     * Post once, if this really is newer than what is running.
+     *
+     * <p>Called from two places and possibly from two threads, so the watermark
+     * is what keeps it to one notification: both the mirror and this service's
+     * own fetch usually name the same version, and the second one through finds
+     * it already recorded.
+     */
+    /**
+     * What this build calls itself.
+     *
+     * <p>Read from the installed package rather than from {@code BuildConfig},
+     * which AGP no longer generates unless asked, and which would be a second
+     * statement of the same fact besides. This is the figure the phone's own app
+     * info shows, so a bug report quoting it and this notification agree.
+     */
+    private String runningVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (final Exception e) {
+            // Cannot happen for our own package, and if it somehow does then
+            // "no version" makes isNewer false and nothing is announced, which
+            // is the right way to fail.
+            return null;
+        }
+    }
+
+    private synchronized void announceIfNewer(final String candidate) {
+        // Canonicalised before anything else touches it. The two sources spell
+        // the same release differently - the app has already stripped the `v`,
+        // the raw tag has not - and the watermark below is a string comparison,
+        // so without this the second one through would miss and announce again.
+        final String version = UpdateCheck.normalise(candidate);
+        if (version == null) {
+            return;
+        }
+        final String running = runningVersion();
+        if (!UpdateCheck.isNewer(version, running)) {
+            return;
+        }
+        if (version.equals(prefs().getString(KEY_UPDATE_ANNOUNCED, null))) {
+            return;
+        }
+        prefs().edit().putString(KEY_UPDATE_ANNOUNCED, version).apply();
+
+        final PendingIntent open = PendingIntent.getActivity(
+                this, 0, new Intent(this, MainActivity.class),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
+        getSystemService(NotificationManager.class).notify(
+                NOTIFICATION_ID_UPDATE,
+                new Notification.Builder(this, CHANNEL_UPDATE)
+                        .setContentTitle("Atlas " + version + " is available")
+                        .setContentText("You are on " + running
+                                + ". Open Atlas, then Settings, to get it.")
+                        .setSmallIcon(R.mipmap.ic_launcher)
+                        .setContentIntent(open)
+                        .setAutoCancel(true)
+                        .build());
     }
 
     /**
@@ -2026,7 +2522,13 @@ public class HelioSyncService extends Service {
 
         // sinceDays 0: this link fetches nothing at all. It exists to stream.
         liveLink.connect(0, true);
-        trail(System.currentTimeMillis(), "live stream opened");
+        // **Deliberately not trailed.** This fires on every screen-on while a
+        // session runs, so on 2026-08-21 twenty-two of the trail's 120 lines
+        // were this one and the morning being investigated had been pushed off
+        // the front by them. The trail is a fixed number of lines, so anything
+        // chatty in it is spending somebody else's history. Live streaming has
+        // its own state in KEY_LIVE_HR and needs no diary.
+        android.util.Log.d("HelioBle", "[bg] live stream opened");
     }
 
     /**

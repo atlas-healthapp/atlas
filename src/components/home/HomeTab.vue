@@ -221,7 +221,12 @@
           :tappable="canOpenVital(row.key)"
           @click.stop="openVital(row.key)"
         >
-          <span class="calib mono">CALIBRATING</span>
+          <!-- BUILDING A RANGE, which is what BODY and FITNESS already call
+               this exact state: a real reading with no personal normal to
+               judge it against yet. CALIBRATING named the app's arithmetic
+               rather than the thing being waited for, and was a third wording
+               for a state the app already had two names too many for. -->
+          <span class="calib mono">BUILDING A RANGE</span>
         </MetricRow>
 
         <MetricRow v-else :label="row.label">
@@ -395,7 +400,7 @@ import { useFoodStore } from "@/stores/food";
 import { useUIStore } from "@/stores/ui";
 import RunningSessionRow from "@/components/activity/RunningSessionRow.vue";
 import { useSessionsStore } from "@/stores/sessions";
-import { useHelioStore } from "@/stores/helio";
+import { useHelioStore, DRAIN_PHASE } from "@/stores/helio";
 import { today, addDays, fmtTime, fmtHoursMins } from "@/utils/date";
 import { dailyValuesForRange } from "@/utils/dailyRollup";
 import { familyColor, familyInkColor } from "@/utils/families";
@@ -629,7 +634,8 @@ const recoveryText = computed(() =>
 );
 const recoveryMeta = computed(() => {
   if (recovery.value.state === "calibrating") {
-    return `CALIBRATING · ${recovery.value.nights}/${recovery.value.needed} NIGHTS`;
+    // See BodyTab: the count, not the word for the arithmetic behind it.
+    return `${recovery.value.nights} OF ${recovery.value.needed} NIGHTS`;
   }
   if (recovery.value.state !== "ready") return "NO DATA";
   // **Between midnight and waking the score is last night's, and it has to say
@@ -1067,7 +1073,7 @@ const syncNote = computed(() => {
   // sync says it was done recently."
   // Carries the phase when there is one, so the count the drain now publishes
   // reaches the screen instead of a motionless word.
-  if (helio.draining) return { text: helio.syncPhase || "UPDATING" };
+  if (helio.draining) return { text: helio.syncPhase || DRAIN_PHASE };
   if (!helio.connected) return { text: "STRAP NOT CONNECTED", warn: true };
   if (helio.lastSyncError) return { text: "SYNC FAILING", warn: true };
   if (recovery.value.state === "calibrating") return { text: "LEARNING YOUR BASELINE" };
@@ -1516,7 +1522,7 @@ onUnmounted(() => rafId && cancelAnimationFrame(rafId));
 }
 .verdictrow .chev {
   color: var(--dim);
-  font-size: 15px;
+  font-size: 16px;
   flex-shrink: 0;
 }
 .verdict {

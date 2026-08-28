@@ -1,21 +1,11 @@
 <template>
   <div>
-    <div v-if="refreshPrompt" class="panel confirm-panel">
-      <div class="dim-text mono">
-        THIS ITEM IS USED IN {{ refreshPrompt.count }} ALREADY-LOGGED
-        ENTR{{ refreshPrompt.count === 1 ? "Y" : "IES" }}. UPDATE THOSE TO THE
-        NEW NUMBERS TOO?
-      </div>
-      <div class="scanrow">
-        <button class="scanbtn mono" @click="declineRefresh">
-          NO, FUTURE ONLY
-        </button>
-        <button class="save mono" @click="confirmRefresh">
-          YES, UPDATE ALL
-        </button>
-      </div>
-    </div>
-
+    <!-- The "update logged days too?" prompt used to sit here, appearing after
+         the form had closed. It asked the right question at the wrong moment:
+         by then the edit was saved, so it read as the app second-guessing a
+         decision already made, and the item it was about was no longer on
+         screen. `ItemFormSheet` asks inside the form now, before SAVE, and only
+         when a figure that logged days actually copied has moved. -->
     <button class="addbtn mono" @click="openAdd()">+ ADD TO LIBRARY</button>
 
     <!-- Option A of three mocked up 2026-08-17: search and kind chips above the
@@ -170,7 +160,6 @@ const food = useFoodStore();
 const formOpen = ref(false);
 const editingItem = ref(null); // item being edited, null = adding new
 const autoScan = ref(false); // opens ItemFormSheet straight into the scanner
-const refreshPrompt = ref(null); // { itemId, count } while the opt-in fix prompt is showing
 
 function openAdd(scan = false) {
   editingItem.value = null;
@@ -182,11 +171,8 @@ function openEdit(item) {
   autoScan.value = false;
   formOpen.value = true;
 }
-function onFormSaved({ editingId, count }) {
+function onFormSaved() {
   formOpen.value = false;
-  if (editingId && count > 0) {
-    refreshPrompt.value = { itemId: editingId, count };
-  }
 }
 
 // Ingredient-only staples are folded in here too now (previously a separate,
@@ -363,13 +349,6 @@ const grouped = computed(() => {
 });
 const letters = computed(() => Object.keys(grouped.value).sort());
 
-function declineRefresh() {
-  refreshPrompt.value = null;
-}
-function confirmRefresh() {
-  food.refreshSnapshotsForItem(refreshPrompt.value.itemId);
-  refreshPrompt.value = null;
-}
 </script>
 
 <style scoped>
@@ -378,7 +357,7 @@ function confirmRefresh() {
 }
 .dim-text {
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 400;
 }
 .confirm-panel {
@@ -396,14 +375,14 @@ function confirmRefresh() {
   flex: 1;
   border: 1px solid color-mix(in srgb, var(--fam-intake) 45%, transparent);
   color: var(--fam-intake);
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   padding: 10px 0;
 }
 .scanrow .save {
   flex: 2;
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   color: var(--bg1);
   background: var(--fam-intake);
@@ -414,7 +393,7 @@ function confirmRefresh() {
   text-align: center;
   border: 1px solid color-mix(in srgb, var(--fam-intake) 45%, transparent);
   color: var(--fam-intake);
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 2px;
   padding: 12px 0;
   margin-bottom: 14px;
@@ -443,7 +422,7 @@ function confirmRefresh() {
   background: none;
   border: none;
   color: var(--ink);
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 1.4px;
   outline: none;
 }
@@ -459,7 +438,7 @@ function confirmRefresh() {
   background: none;
   border: none;
   color: var(--fam-intake);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.4px;
   cursor: pointer;
 }
@@ -475,7 +454,7 @@ function confirmRefresh() {
   border: 1px solid color-mix(in srgb, var(--dim) 30%, transparent);
   border-radius: 20px;
   color: var(--dim);
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   cursor: pointer;
 }
@@ -494,7 +473,7 @@ function confirmRefresh() {
   background: none;
   border: none;
   color: var(--fam-intake);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.4px;
   cursor: pointer;
   padding: 4px 0;
@@ -513,7 +492,7 @@ function confirmRefresh() {
   border-radius: 6px;
   color: var(--ink);
   font-family: inherit;
-  font-size: 14px;
+  font-size: 15px;
   outline: none;
 }
 .mealname::placeholder {
@@ -524,7 +503,7 @@ function confirmRefresh() {
 }
 .confirm-panel .hint {
   margin-top: 8px;
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.5;
 }
 .scanrow .save:disabled {
@@ -533,12 +512,12 @@ function confirmRefresh() {
 }
 .stapnote {
   padding: 2px 0 8px;
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.55;
   letter-spacing: 0.8px;
 }
 .indexletter {
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 2px;
   color: var(--dim);
   padding: 8px 0 4px;

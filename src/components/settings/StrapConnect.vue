@@ -213,18 +213,11 @@
           {{ showLog ? "HIDE LOG" : "SHOW LOG" }}
         </button>
       </div>
-      <div v-if="showLog" class="log mono">
-        <div
-          v-for="(line, i) in helio.logLines"
-          :key="i"
-          :class="{ err: line.includes('!') }"
-        >
-          {{ line }}
-        </div>
-        <div v-if="!helio.logLines.length" class="dim-text">
-          NOTHING RECORDED. THE CONNECT DID NOT REACH THE STRAP.
-        </div>
-      </div>
+      <LogLines
+        v-if="showLog"
+        :lines="helio.logLines"
+        empty="NOTHING RECORDED. THE CONNECT DID NOT REACH THE STRAP."
+      />
     </div>
 
     <div v-if="message" class="dim-text mono note">{{ message }}</div>
@@ -236,6 +229,7 @@
 import { computed, ref } from "vue";
 import { useHelioStore } from "@/stores/helio";
 import PeakMark from "@/components/layout/PeakMark.vue";
+import LogLines from "./LogLines.vue";
 
 const emit = defineEmits(["connected"]);
 const helio = useHelioStore();
@@ -380,7 +374,7 @@ async function doConnect() {
 .steps li {
   display: flex;
   gap: 9px;
-  font-size: 10.5px;
+  font-size: var(--set-label);
   line-height: 1.6;
   letter-spacing: 1px;
   color: var(--dim);
@@ -393,7 +387,7 @@ async function doConnect() {
   border: 1px solid color-mix(in srgb, var(--acc) 45%, transparent);
   border-radius: 50%;
   color: var(--acc);
-  font-size: 9px;
+  font-size: var(--set-label);
   line-height: 15px;
   text-align: center;
 }
@@ -404,13 +398,13 @@ async function doConnect() {
 }
 .note {
   margin-top: 12px;
-  font-size: 10px;
+  font-size: var(--set-label);
   line-height: 1.6;
   letter-spacing: 1px;
 }
 .err {
   margin-top: 6px;
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 1px;
   color: var(--bad, #e5484d);
 }
@@ -423,12 +417,12 @@ async function doConnect() {
   border: 1px solid color-mix(in srgb, var(--acc) 30%, transparent);
   border-radius: 7px;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--set-value);
   letter-spacing: 1px;
 }
 .keyfield::placeholder {
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--set-micro);
   letter-spacing: 1.2px;
 }
 .keyfield:focus {
@@ -445,11 +439,11 @@ async function doConnect() {
 }
 .databtn {
   flex: 1;
-  min-height: 44px;
+  min-height: var(--set-row-h);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--dim) 65%, transparent);
   color: var(--ink);
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 0.1em;
   cursor: pointer;
 }
@@ -511,7 +505,7 @@ async function doConnect() {
 }
 .phase {
   margin-top: 14px;
-  font-size: 10.5px;
+  font-size: var(--set-label);
   letter-spacing: 1.4px;
   color: var(--acc);
   text-align: center;
@@ -527,7 +521,7 @@ async function doConnect() {
   border-top: 1px solid color-mix(in srgb, var(--dim) 30%, transparent);
 }
 .ftitle {
-  font-size: 11px;
+  font-size: var(--set-micro);
   line-height: 1.55;
   letter-spacing: 1px;
 }
@@ -544,7 +538,7 @@ async function doConnect() {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  min-height: 44px;
+  min-height: var(--set-row-h);
   justify-content: center;
   padding: 7px 11px;
   text-align: left;
@@ -558,31 +552,13 @@ async function doConnect() {
   border-color: var(--acc);
 }
 .bname {
-  font-size: 13px;
+  font-size: var(--set-value);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .baddr {
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 0.1em;
   color: var(--dim);
-}
-.log {
-  margin-top: 10px;
-  max-height: 220px;
-  padding: 9px 10px;
-  overflow: auto;
-  /* Sideways rather than wrapping: a wrapped hex frame is unreadable, and the
-     page must not scroll horizontally to accommodate it. */
-  white-space: pre;
-  background: color-mix(in srgb, var(--dim) 12%, transparent);
-  border-radius: 7px;
-  font-size: 9.5px;
-  line-height: 1.7;
-  color: var(--dim);
-  user-select: text;
-}
-.log .err {
-  color: var(--bad, #e5484d);
 }
 </style>

@@ -485,7 +485,7 @@ const ticks = computed(() => hourTicks(geo.value));
 const verdict = computed(() => {
   if (loading.value) return "Reading the day.";
   const g = geo.value;
-  if (!g) return "The band reported too little that day to draw.";
+  if (!g) return "Too few readings that day to draw the shape.";
 
   const peak = g.columns.reduce((best, c) => (best == null || c.high > best.high ? c : best), null);
   const when = peak ? clock(peak.minute) : null;
@@ -514,39 +514,6 @@ const infoParagraphs = computed(() => (METRICS.hr.info ?? "").split("\n\n"));
 </script>
 
 <style scoped>
-/* A drill-through is a fixed overlay, and `.page` is **not** a global rule -
-   every page declares its own copy, so omitting it here left this one laid out
-   in normal flow underneath Home, pushing content past the bottom nav. Found on
-   the device; it builds and tests clean either way, which is the template-shaped
-   failure this codebase keeps warning about.
-   Kept byte-identical to StressPage's rather than improvised. The duplication
-   itself is real - PageHeader was extracted for exactly this reason and `.page`
-   was not - but unifying it is a change to six pages, not a bug fix. */
-.page {
-  position: fixed;
-  inset: 0;
-  z-index: 600;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg1);
-  color: var(--body);
-  font-family: var(--font-sans);
-  padding: calc(12px + env(safe-area-inset-top)) 18px
-    calc(20px + env(safe-area-inset-bottom));
-  overflow: hidden;
-  animation: pagein 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-@keyframes pagein {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .page {
-    animation: none;
-  }
-}
 .pscroll {
   flex: 1;
   min-height: 0;
@@ -657,7 +624,7 @@ const infoParagraphs = computed(() => (METRICS.hr.info ?? "").split("\n\n"));
   flex-direction: column;
   justify-content: space-between;
   text-align: right;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 0.6px;
   color: var(--dim);
 }
@@ -668,7 +635,7 @@ const infoParagraphs = computed(() => (METRICS.hr.info ?? "").split("\n\n"));
   position: absolute;
   left: 0;
   transform: translateY(-125%);
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 0.6px;
   color: var(--dim);
   background: var(--panel);
@@ -682,7 +649,7 @@ const infoParagraphs = computed(() => (METRICS.hr.info ?? "").split("\n\n"));
 .hours span {
   position: absolute;
   transform: translateX(-50%);
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 0.6px;
   color: var(--dim);
 }
@@ -730,7 +697,7 @@ const infoParagraphs = computed(() => (METRICS.hr.info ?? "").split("\n\n"));
 .histaxis {
   display: flex;
   justify-content: space-between;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
   padding-top: 6px;
@@ -820,7 +787,7 @@ const infoParagraphs = computed(() => (METRICS.hr.info ?? "").split("\n\n"));
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 11.5px;
+  font-size: 14px;
   letter-spacing: 1.4px;
   color: var(--dim);
   flex: none;
@@ -859,7 +826,7 @@ const infoParagraphs = computed(() => (METRICS.hr.info ?? "").split("\n\n"));
 }
 .expand {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 1.6px;
   color: var(--dim);
   background: none;

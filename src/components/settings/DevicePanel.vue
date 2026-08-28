@@ -46,6 +46,27 @@
         <span class="k mono">A FULL CHARGE LASTS</span>
         <span class="v">{{ lifeLabel }}</span>
       </div>
+      <!-- A setting on the strap rather than a reading off it, and the only
+           row here you can act on. It lives in HELIO STRAP because that is what
+           it is about: it shipped inside ALARM on 2026-08-25 purely because
+           that is where the config read was wired, and read as a paragraph
+           about walks above two alarm times.
+
+           LOW is marked, because it is the value that silently costs you
+           records - a Sunday walk left none at all - but it is still a value
+           somebody may choose on purpose, so the row states it rather than
+           warning about it. -->
+      <button
+        v-if="detection"
+        class="row rowbtn"
+        type="button"
+        @click="detectionOpen = true"
+      >
+        <span class="k mono">WORKOUT DETECTION</span>
+        <span class="v" :class="{ low: detection.low }">{{ detection.label }}</span>
+        <span class="chev" aria-hidden="true">›</span>
+      </button>
+
       <div v-if="basisLabel" class="dim-text mono note">{{ basisLabel }}</div>
       <div v-if="trendLabel" class="dim-text mono note">{{ trendLabel }}</div>
       <!-- **One line about the charge, not two.** "On this charge 4.3 days, now
@@ -62,7 +83,25 @@
            is not a setting, and there is no control anywhere to change it - so it
            said a number at somebody who could do nothing with it. -->
 
-      <div v-if="failing" class="dim-text mono err">
+      <!-- **A rejected key is not a failed sync and must not read like one.**
+           Every other failure here fixes itself on the next run: out of range,
+           the link busy because the Zepp app has the band, a close mid-sync. This
+           one never does. It means the strap was paired somewhere else - which is
+           what happens when somebody logs out of Zepp and lets it re-bind the
+           band - and Atlas will fail every connect until it is paired again. It
+           is the only failure on this panel the reader has to do something about,
+           so it says what happened and what to do rather than printing the
+           protocol's own words at them. -->
+      <div v-if="helio.authRejected" class="mono authgone">
+        <div class="authhd">THE STRAP NO LONGER ACCEPTS THIS PAIRING</div>
+        <p class="authbody">
+          Something else has paired with it since, which is usually the Zepp app
+          being signed out of and back in. Atlas cannot read the band until you
+          pair it again below. Nothing already collected is affected.
+        </p>
+      </div>
+
+      <div v-else-if="failing" class="dim-text mono err">
         {{ helio.lastSyncError.toUpperCase() }}
       </div>
 
@@ -97,31 +136,28 @@
       </button>
     </div>
 
-    <div v-if="showLog" ref="logEl" class="log mono">
-      <div
-        v-for="(line, i) in helio.logLines"
-        :key="i"
-        :class="{ err: line.includes('!') }"
-      >
-        {{ line }}
-      </div>
-      <div v-if="!helio.logLines.length" class="dim-text">
-        NOTHING YET. RUN A SYNC TO SEE THE EXCHANGE.
-      </div>
-    </div>
+    <LogLines v-if="showLog" :lines="helio.logLines" />
 
     <Transition name="toast">
       <div v-if="message" class="msg mono">{{ message }}</div>
     </Transition>
+    <DetectionSheet
+      v-if="detectionOpen"
+      :current="bandConfig.detectionSensitivity"
+      @close="detectionOpen = false"
+      @saved="onDetectionSaved"
+    />
   </SettingsSection>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useHelioStore } from "@/stores/helio";
 import { getSamples } from "@/utils/sampleDb";
 import { batteryLife, formatDays, lifeBand } from "@/utils/strapHealth";
 import SettingsSection from "./SettingsSection.vue";
+import LogLines from "./LogLines.vue";
+import DetectionSheet from "./DetectionSheet.vue";
 import StrapConnect from "./StrapConnect.vue";
 
 // Open state is owned by the settings page, not here, so only one section can be
@@ -132,6 +168,56 @@ const props = defineProps({ open: { type: Boolean, default: false } });
 defineEmits(["toggle"]);
 
 const helio = useHelioStore();
+
+// ── the strap's own settings ───────────────────────────────────────────────
+//
+// Read from the band on every sync (HelioConfig, endpoint 0x000a) and cached
+// natively, so this reads a mirror rather than talking to the strap itself.
+
+const DETECTION_LABELS = ["HIGH", "STANDARD", "LOW"];
+const detectionOpen = ref(false);
+const bandConfig = ref({ detectionSensitivity: -1 });
+
+/**
+ * What to show on the row, or null while the band has said nothing.
+ *
+ * Withheld rather than defaulted: -1 is "not asked yet" and it has to be told
+ * apart from HIGH, which is 0. A default here would be the app asserting a
+ * setting it has never read, which is the whole thing the read exists to stop.
+ */
+const detection = computed(() => {
+  const level = bandConfig.value.detectionSensitivity;
+  if (level < 0 || level > 2) return null;
+  return { label: DETECTION_LABELS[level], low: level === 2 };
+});
+
+async function loadBandConfig() {
+  const res = await helio.alarmHistory();
+  if (!res) return;
+  bandConfig.value = { detectionSensitivity: res.detectionSensitivity ?? -1 };
+}
+
+/** The strap has accepted it, so the row can show the new value at once. */
+function onDetectionSaved(level) {
+  detectionOpen.value = false;
+  bandConfig.value = { detectionSensitivity: level };
+}
+
+// Loaded when the panel opens, and again after a sync: a sync is when the band
+// reports this, and when a queued change actually goes out.
+watch(
+  () => props.open,
+  (isOpen) => {
+    if (isOpen) loadBandConfig();
+  },
+  { immediate: true }
+);
+watch(
+  () => helio.lastSyncAt,
+  () => {
+    if (props.open) loadBandConfig();
+  }
+);
 
 const keyDraft = ref("");
 
@@ -163,7 +249,6 @@ const keyProblem = computed(() => {
 });
 const showLog = ref(false);
 const message = ref("");
-const logEl = ref(null);
 const copied = ref(false);
 
 async function copyDetails() {
@@ -303,9 +388,10 @@ const basisLabel = computed(() => {
     //
     // "Run" was the first replacement and it is worse, not better: it is this
     // file's own jargon for a discharge segment and means nothing to a reader.
-    return out.fromCurrentRun
-      ? "EARLY ESTIMATE, FROM A DISCHARGE THAT IS STILL GOING."
-      : "EARLY ESTIMATE, FROM ONE DISCHARGE.";
+    // The "early estimate" sub-line came off on 2026-08-25. BATTERY HEALTH
+    // above already says MEASURING while the figure is provisional, so this
+    // was a second hedge about the same number.
+    return "";
   }
   if (out.state === "calibrating") {
     return batteryReadings.value.length
@@ -380,16 +466,6 @@ onMounted(async () => {
 // branch that only renders once `connected` is true - so it never held the
 // attempt you opened it to look at, and somebody whose first connect was failing
 // could not reach it at all. One buffer, always collecting, both panels read it.
-watch(
-  () => helio.logLines.length,
-  () => {
-    if (!showLog.value) return;
-    nextTick(() => {
-      if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight;
-    });
-  }
-);
-
 function flash(text) {
   message.value = text;
   setTimeout(() => (message.value = ""), 4000);
@@ -424,17 +500,90 @@ async function doDisconnect() {
 </script>
 
 <style scoped>
-.panel-hd .err {
+/* A row you can act on, among rows you cannot. Keeps `.row`'s layout and only
+   undoes what a <button> brings with it. */
+.rowbtn {
+  min-height: var(--set-row-h);
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 9px 0;
+  text-align: left;
+}
+/* `.row` is space-between, so a third child lands the value in the MIDDLE of
+   the row instead of against the right edge where every other value sits.
+   Pushing the value over groups it with the chevron. */
+.rowbtn .v {
+  margin-left: auto;
+}
+.rowbtn .chev {
+  color: var(--dim);
+  font-size: var(--set-value);
+  margin-left: 8px;
+}
+/* LOW is the value that silently costs you records. Marked rather than warned
+   about: it is still a value somebody may choose on purpose. */
+.rowbtn .v.low {
+  color: var(--bad);
+}
+
+.panel-hd /* Its own treatment, because it is the one message here that is an instruction
+   rather than a report. --bad for the heading; the body stays readable prose
+   rather than a second line of shouting mono. */
+.authgone {
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+  border-radius: 8px;
+  padding: 12px 13px;
+  margin-top: 10px;
+}
+.authhd {
+  font-size: var(--fs-label);
+  letter-spacing: 1.4px;
+  color: var(--bad);
+}
+.authbody {
+  font-family: var(--font-sans);
+  font-size: var(--fs-second);
+  line-height: 1.5;
+  color: var(--body);
+  margin: 8px 0 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.err {
   color: var(--bad);
 }
 .dim-text {
   color: var(--dim);
-  font-size: 10px;
+  font-size: var(--set-label);
   line-height: 1.6;
   letter-spacing: 0.05em;
   margin-bottom: 10px;
 }
-.dim-text.err {
+.dim-text/* Its own treatment, because it is the one message here that is an instruction
+   rather than a report. --bad for the heading; the body stays readable prose
+   rather than a second line of shouting mono. */
+.authgone {
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+  border-radius: 8px;
+  padding: 12px 13px;
+  margin-top: 10px;
+}
+.authhd {
+  font-size: var(--fs-label);
+  letter-spacing: 1.4px;
+  color: var(--bad);
+}
+.authbody {
+  font-family: var(--font-sans);
+  font-size: var(--fs-second);
+  line-height: 1.5;
+  color: var(--body);
+  margin: 8px 0 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.err {
   color: var(--bad);
   margin-top: 8px;
   margin-bottom: 0;
@@ -443,19 +592,23 @@ async function doDisconnect() {
   margin-top: 8px;
   margin-bottom: 0;
 }
+/* Real height rather than padding scraps. Measured at 23px before this, well
+   under Android's 48dp minimum - and these rows carry the smallest type on the
+   surface, so they were the hardest to both read and hit. */
 .row {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
+  min-height: var(--set-row-h);
   padding: 3px 0;
 }
 .k {
-  font-size: 9.5px;
+  font-size: var(--set-label);
   letter-spacing: 1.4px;
   color: var(--dim);
 }
 .v {
-  font-size: 13px;
+  font-size: var(--set-value);
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
@@ -467,7 +620,7 @@ async function doDisconnect() {
   background: var(--bg0);
   border: 1px solid var(--dim);
   color: var(--ink);
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 0.08em;
 }
 .keyfield:focus {
@@ -492,7 +645,7 @@ async function doDisconnect() {
   display: flex;
   gap: 9px;
   align-items: flex-start;
-  font-size: 10.5px;
+  font-size: var(--set-label);
   letter-spacing: 0.9px;
   line-height: 1.5;
   color: var(--dim);
@@ -506,7 +659,7 @@ async function doDisconnect() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: var(--set-label);
   opacity: 0.85;
   margin-top: 1px;
 }
@@ -524,11 +677,11 @@ async function doDisconnect() {
 }
 .databtn {
   flex: 1;
-  min-height: 44px;
+  min-height: var(--set-row-h);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--dim) 65%, transparent);
   color: var(--ink);
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 0.1em;
   cursor: pointer;
 }
@@ -546,30 +699,9 @@ async function doDisconnect() {
 .databtn:active:not(:disabled) {
   background: color-mix(in srgb, var(--acc) 12%, transparent);
 }
-.log {
-  margin-top: 10px;
-  max-height: 220px;
-  overflow-y: auto;
-  /* Frame dumps are wide and fixed-width; wrapping them makes the columns
-     unreadable, so the log scrolls sideways instead of the page doing it. */
-  overflow-x: auto;
-  background: var(--bg0);
-  border: 1px solid var(--dim);
-  padding: 8px;
-  font-size: 9px;
-  line-height: 1.5;
-  white-space: pre;
-  color: var(--body);
-  /* Selectable, because COPY DETAILS can be refused by the WebView and hand
-     selection is then the only way the log leaves the phone. */
-  user-select: text;
-}
-.log .err {
-  color: var(--bad);
-}
 .msg {
   margin-top: 10px;
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 1px;
   color: var(--acc);
 }

@@ -51,7 +51,7 @@ defineEmits(["close"]);
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: 1.8px;
   color: var(--dim);
   background: none;
@@ -71,7 +71,7 @@ defineEmits(["close"]);
   gap: 6px;
 }
 .context {
-  font-size: 13px;
+  font-size: 14.5px;
   letter-spacing: 1.8px;
   color: var(--dim);
 }

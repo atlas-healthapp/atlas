@@ -89,44 +89,21 @@
           @toggle="toggle('alarm')"
         />
 
-        <!-- **One card, not five.** Open, the group's rows have to read as being
-             inside it rather than as four more drawers that appeared at the same
-             level, which is what a row of siblings looked like. So the group is a
-             single `.panel`: SETUP is its header and the rows are rows in it,
-             hairline-separated and inset, exactly like every other multi-row card
-             in the app. Passing `nested` is what drops each row's own surface, so
-             this is still one container rather than a card inside a card.
+        <!-- **The strap stays above this group rather than inside SETUP**, on the
+             user's call: it is the row you need on the day it stops working, and
+             a set-once group is exactly where it must not be that morning.
 
-             The group keeps its own flag rather than a value of `openSection`,
-             because that ref is one-open-at-a-time and opening a child would
-             otherwise close the group the child lives in. -->
-        <div class="panel setupgroup" :class="{ open: setupOpen }">
-          <button
-            class="grouprow"
-            :class="{ open: setupOpen }"
-            type="button"
-            :aria-expanded="setupOpen"
-            @click="toggleSetup"
-          >
-            <span class="grouptitle mono">SETUP</span>
-            <span class="groupright">
-              <span class="groupsum mono">
-                {{ setupOpen ? "4 THINGS YOU SET ONCE" : "YOU, UNITS, THEME, TRIPS" }}
-              </span>
-              <svg
-                class="groupcaret"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </span>
-          </button>
+             Why the group is one card rather than four siblings, and why it keeps
+             its own open flag, are both in `SettingsGroup.vue`, which was
+             extracted from this markup on 2026-08-25 when LOGS became the
+             second group. -->
+        <SettingsGroup
+          title="SETUP"
+          summary="YOU, UNITS, THEME, TRIPS"
+          open-summary="4 THINGS YOU SET ONCE"
+          :open="setupOpen"
+          @toggle="toggleSetup"
+        >
 
         <!-- Both fields were only ever askable at first run, so anyone already
              past it could not set or correct them. Date of birth needs a way in
@@ -280,8 +257,7 @@
           </div>
           <button class="databtn mono trips" @click="tripManagerOpen = true">MANAGE TRIPS</button>
         </SettingsSection>
-        </div>
-        <!-- /setupgroup -->
+        </SettingsGroup>
 
         <!-- **Below the group, and named for what it does.** It was called
              DATA // BACKUP with a summary of "JSON", which described the file
@@ -359,13 +335,24 @@
           </div>
         </SettingsSection>
 
-        <!-- Last, and a row rather than a section: it does one thing, and
-             opening a panel to find a single button would be the same
-             discoverability problem one level down. -->
+        <!-- A row rather than a section: it does one thing, and opening a panel
+             to find a single button would be the same discoverability problem one
+             level down. -->
         <button class="panel tourrow" type="button" @click="ui.startTour()">
           <span class="trtitle">TOUR</span>
           <span class="trsub mono">A SHORT WALK THROUGH THE HOME SCREEN</span>
         </button>
+
+        <!-- **Last, above the version**, which is where diagnostics live in every
+             app anybody has used, and pointedly not inside SETUP - that group is
+             the things you set once and never return to, and a log is the one you
+             go looking for on the morning something went wrong. -->
+        <LogsGroup
+          :open="logsOpen"
+          :open-section="openSection"
+          @toggle-group="toggleLogs"
+          @toggle="toggle"
+        />
 
         <!-- **Only ever present when there is genuinely something newer**, so it
              cannot become another permanent row nobody reads. It sits beside the
@@ -452,17 +439,30 @@ const archiveSummary = computed(() => {
  */
 const setupOpen = ref(false);
 
-/** Rows that live inside the group, so collapsing it can tidy up after itself. */
+/** Rows that live inside a group, so collapsing one can tidy up after itself. */
 const SETUP_KEYS = ["you", "units", "theme", "trips"];
+const LOG_KEYS = ["log-mornings", "log-sync", "log-strap"];
+
+/** The same flag for LOGS, for the same reason and with the same tidy-up. */
+const logsOpen = ref(false);
+
+/**
+ * A child left open while its group closes would spring back expanded next time
+ * the group opens, which reads as the page remembering something you did not
+ * ask it to.
+ */
+function closeChildren(keys) {
+  if (keys.includes(openSection.value)) openSection.value = null;
+}
 
 function toggleSetup() {
   setupOpen.value = !setupOpen.value;
-  // A child left open while the group closes would spring back expanded next
-  // time the group opens, which reads as the page remembering something you did
-  // not ask it to.
-  if (!setupOpen.value && SETUP_KEYS.includes(openSection.value)) {
-    openSection.value = null;
-  }
+  if (!setupOpen.value) closeChildren(SETUP_KEYS);
+}
+
+function toggleLogs() {
+  logsOpen.value = !logsOpen.value;
+  if (!logsOpen.value) closeChildren(LOG_KEYS);
 }
 import { useThemeStore, THEMES } from "@/stores/theme";
 import { useCheckinStore } from "@/stores/checkin";
@@ -477,6 +477,8 @@ import TripManager from "../layout/TripManager.vue";
 import DevicePanel from "./DevicePanel.vue";
 import AlarmPanel from "./AlarmPanel.vue";
 import SettingsSection from "./SettingsSection.vue";
+import SettingsGroup from "./SettingsGroup.vue";
+import LogsGroup from "./LogsGroup.vue";
 import GoalsPanel from "./GoalsPanel.vue";
 import UnitsPanel from "./UnitsPanel.vue";
 import DialsPanel from "./DialsPanel.vue";
@@ -697,19 +699,21 @@ function doV10Merge() {
 }
 .intro .itext {
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--set-prose);
   line-height: 1.55;
   color: var(--body);
 }
 .idismiss {
   margin-top: 8px;
   margin-left: -6px;
-  min-height: 38px;
+  /* BACK and the profile chip reach 48 through ::after hit-area extenders;
+     this one was simply short. */
+  min-height: var(--set-row-h);
   padding: 0 6px;
   background: none;
   border: 0;
   color: var(--acc);
-  font-size: 10.5px;
+  font-size: var(--set-label);
   letter-spacing: 1.8px;
   cursor: pointer;
 }
@@ -729,12 +733,12 @@ function doV10Merge() {
   cursor: pointer;
 }
 .tourrow .trtitle {
-  font-size: 13px;
+  font-size: var(--set-value);
   color: var(--acc);
   letter-spacing: 0.5px;
 }
 .tourrow .trsub {
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 1.4px;
   color: var(--dim);
 }
@@ -754,42 +758,54 @@ function doV10Merge() {
   border: 1px solid color-mix(in srgb, var(--acc) 40%, transparent);
 }
 .updaterow .uptitle {
-  font-size: 13px;
+  font-size: var(--set-value);
   color: var(--acc);
   letter-spacing: 0.5px;
 }
 .updaterow .upsub {
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 1.4px;
   color: var(--dim);
 }
 
+/* The shell itself is global now (`.page` in style.css). This is the one page
+   that wants a different surface: the same gradient as the app behind it,
+   anchored to the viewport, so moving here does not read as a different surface.
+   Everything else - the fixed inset, the safe-area padding, the entry animation
+   - comes from the global rule. */
+/* ── the settings type scale ────────────────────────────────────────────────
+ *
+ * **Measured on the device, not chosen by eye** (2026-08-25). Settings carried
+ * NINE distinct sizes from 8px to 16px, and the phone runs at a system
+ * `font_scale` of 0.85 which the WebView honours - so a 9.5px row label was
+ * rendering at 8.1px and the profile sub-line at 6.8px. Tuning it in a desktop
+ * browser would have missed by that 15%.
+ *
+ * Five steps at roughly 1.15 between them, with a 12px floor so nothing renders
+ * under about 10 even at a reduced system scale.
+ *
+ * **Scoped to this page rather than moved in `style.css`.** `--fs-label` and
+ * friends are global and shifting them would move rows across the whole app.
+ * Custom properties inherit through scoped styles, so every panel below picks
+ * these up without knowing where they came from - the same call the 2026-08-17
+ * settings pass made. */
 .page {
-  position: fixed;
-  inset: 0;
-  z-index: 600;
-  /* Same gradient as the app behind it, anchored to the viewport, so moving
-     here does not read as a different surface. */
+  --set-label: 12px;
+  --set-micro: 12px;
+  --set-summary: 13.5px;
+  --set-value: 16px;
+  --set-title: 16px;
+  --set-prose: 15px;
+  /* Android asks for 48dp with 8dp between; Atlas's 44 is the iOS number.
+     Measured across the open strap panel, 12 of 19 targets were under it and
+     the settings rows were 23px. */
+  --set-row-h: 48px;
+
+  background: none;
   background-image: var(--page-bg);
   background-size: 100vw 100vh;
   background-position: 0 0;
   background-repeat: no-repeat;
-  display: flex;
-  flex-direction: column;
-  /* Safe-area padding on the shell, never on the scrolling child: on the child
-     the inset scrolls away with the content and panels ride up under the
-     status icons. */
-  /* Matches every tab's own padding, so the avatar sits in the same place
-     before and after the page opens rather than jumping a few pixels. */
-  padding: calc(12px + env(safe-area-inset-top)) 18px
-    calc(20px + env(safe-area-inset-bottom));
-  overflow: hidden;
-  color: var(--body);
-  font-family: var(--font-sans);
-  animation: pagein 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-@keyframes pagein {
-  from { opacity: 0; transform: translateY(8px); }
 }
 @media (prefers-reduced-motion: reduce) {
   .page { animation: none; }
@@ -825,7 +841,7 @@ function doV10Merge() {
   padding: 7px 9px;
   border: 1px solid color-mix(in srgb, var(--acc) 45%, transparent);
   color: var(--acc);
-  font-size: 9px;
+  font-size: var(--set-label);
   letter-spacing: 1.8px;
   cursor: pointer;
   position: relative;
@@ -874,7 +890,7 @@ function doV10Merge() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: var(--set-value);
   letter-spacing: 0.3px;
   line-height: 1;
   cursor: pointer;
@@ -897,7 +913,7 @@ function doV10Merge() {
   outline-offset: 2px;
 }
 .pname {
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.2;
   color: var(--ink);
   /* A long name shortens rather than pushing the avatar off the row. */
@@ -906,7 +922,7 @@ function doV10Merge() {
   white-space: nowrap;
 }
 .pmeta {
-  font-size: 8px;
+  font-size: var(--set-label);
   letter-spacing: 1.4px;
   color: var(--dim);
   margin-top: 3px;
@@ -941,7 +957,7 @@ function doV10Merge() {
   transform: rotate(45deg);
 }
 .tsub {
-  font-size: 9px;
+  font-size: var(--set-label);
   letter-spacing: 2px;
   margin-top: 8px;
   color: var(--dim);
@@ -955,84 +971,18 @@ function doV10Merge() {
 }
 .sexbtn {
   flex: 1;
-  min-height: 44px;
+  min-height: var(--set-row-h);
   border: 1px solid var(--panel-line);
   border-radius: 6px;
   background: none;
   color: var(--dim);
-  font-size: var(--fs-micro);
+  font-size: var(--set-micro);
   letter-spacing: 1.4px;
 }
 .sexbtn.on {
   color: var(--bg1);
   background: var(--acc);
   border-color: var(--acc);
-}
-/* The group's card. One surface holding the header and its rows, so what is
-   inside SETUP reads as inside it. Closed it is indistinguishable from any other
-   settings row, which is the point: it only becomes a container once it has
-   something to contain. */
-.setupgroup {
-  padding: 0;
-  margin-bottom: 10px;
-  /* clip, not hidden, for the same reason SettingsSection gives: hidden would
-     make this a scroll container and let a slightly-too-wide child scroll inside
-     the card instead of being laid out to fit it. */
-  overflow: clip;
-}
-/* Its header. Deliberately the same metrics and type as SettingsSection's own
-   header, including the 2026-08-17 size bump, so the door looks like the rows it
-   opens. If those move, these move with them. */
-.grouprow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  min-height: 52px;
-  margin: 0;
-  padding: 0 14px;
-  background: none;
-  border: none;
-  text-align: left;
-  cursor: pointer;
-  font-size: 13px;
-  letter-spacing: 1.6px;
-}
-/* Open, the header takes the accent its contents are gathered under, which is the
-   one cue that survives being scrolled past. */
-.grouprow.open .grouptitle {
-  color: var(--acc);
-}
-/* Same nowrap reasoning as SettingsSection's .title. */
-.grouptitle {
-  color: var(--ink);
-  white-space: nowrap;
-  flex: none;
-}
-.groupright {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--dim);
-}
-/* A step below the title, matching SettingsSection's .summary. */
-.groupsum {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  letter-spacing: 1px;
-}
-.groupcaret {
-  width: 15px;
-  height: 15px;
-  flex: none;
-  transition: transform 140ms ease;
-}
-.grouprow.open .groupcaret {
-  transform: rotate(180deg);
 }
 .databtn.trips {
   margin-top: 12px;
@@ -1049,7 +999,7 @@ function doV10Merge() {
 .databtn {
   flex: 1;
   text-align: center;
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 2px;
   color: var(--acc);
   border: 1px solid color-mix(in srgb, var(--acc) 40%, transparent);
@@ -1076,7 +1026,7 @@ function doV10Merge() {
 }
 .dim-text {
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--set-micro);
   font-weight: 400;
 }
 .dim-text.syncerr {
@@ -1086,7 +1036,7 @@ function doV10Merge() {
 .foot {
   margin-top: auto;
   padding-top: 18px;
-  font-size: 8px;
+  font-size: var(--set-label);
   letter-spacing: 2px;
   color: var(--dim);
   text-align: center;
@@ -1101,7 +1051,7 @@ function doV10Merge() {
      messages carry an arbitrary error string and may still wrap. */
   max-width: 310px;
   padding: 11px 18px;
-  font-size: 11px;
+  font-size: var(--set-micro);
   letter-spacing: 1.5px;
   text-align: center;
   color: var(--ink);
@@ -1121,7 +1071,7 @@ function doV10Merge() {
 
 .flabel {
   display: block;
-  font-size: 9.5px;
+  font-size: var(--set-label);
   letter-spacing: 1.4px;
   color: var(--dim);
   margin: 4px 0 5px;
@@ -1134,7 +1084,7 @@ function doV10Merge() {
   background: var(--bg0);
   border: 1px solid color-mix(in srgb, var(--dim) 65%, transparent);
   color: var(--ink);
-  font-size: 12px;
+  font-size: var(--set-summary);
   letter-spacing: 0.06em;
 }
 .pfield:focus {
@@ -1170,14 +1120,14 @@ function doV10Merge() {
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 10px;
+  font-size: var(--set-label);
   letter-spacing: 1.2px;
   color: var(--dim);
   pointer-events: none;
 }
 .dim-note {
   margin-top: 6px;
-  font-size: 9px;
+  font-size: var(--set-label);
   letter-spacing: 0.08em;
   line-height: 1.6;
   color: var(--dim);

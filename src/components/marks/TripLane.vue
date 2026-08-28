@@ -102,7 +102,7 @@ const LANE = 13;
   position: absolute;
   top: 3px;
   left: 0;
-  font-size: 9px;
+  font-size: 13px;
   letter-spacing: 0.6px;
   color: var(--dim);
   white-space: nowrap;

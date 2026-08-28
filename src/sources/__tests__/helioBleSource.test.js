@@ -91,3 +91,56 @@ describe("normaliseSamples", () => {
     expect(normaliseSamples(undefined)).toEqual([]);
   });
 });
+
+// The band re-sends its whole window on every fetch, so a night of background
+// syncs leaves the cache holding the same readings many times over. They used to
+// be written one by one and overwrite each other in IndexedDB.
+describe("normaliseSamples deduplication", () => {
+  const t = Date.parse("2026-08-27T09:00:00Z");
+
+  it("writes one row for a reading that arrived twice", () => {
+    const out = normaliseSamples([
+      { metric: "hr", t, v: 62 },
+      { metric: "hr", t, v: 62 },
+      { metric: "hr", t, v: 62 },
+    ]);
+    expect(out).toEqual([{ metric: "hr", t, v: 62 }]);
+  });
+
+  it("keeps the same reading on two different metrics", () => {
+    // The key is the pair, not the timestamp: a heart rate and a stress reading
+    // taken in the same second are two different facts.
+    const out = normaliseSamples([
+      { metric: "hr", t, v: 62 },
+      { metric: "stress", t, v: 30 },
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("keeps readings a minute apart", () => {
+    const out = normaliseSamples([
+      { metric: "hr", t, v: 62 },
+      { metric: "hr", t: t + 60000, v: 64 },
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  // The property that makes this safe to do at all. putSamples wrote every
+  // duplicate in order and let the last one stand, so keeping the last is the
+  // one choice that cannot change what ends up stored.
+  it("keeps the last value when a duplicated key disagrees with itself", () => {
+    const out = normaliseSamples([
+      { metric: "hr", t, v: 62 },
+      { metric: "hr", t, v: 71 },
+    ]);
+    expect(out).toEqual([{ metric: "hr", t, v: 71 }]);
+  });
+
+  it("drops a duplicate that would not have survived the filters anyway", () => {
+    const out = normaliseSamples([
+      { metric: "hr", t, v: 62 },
+      { metric: "hr", t, v: 0 },
+    ]);
+    expect(out).toEqual([{ metric: "hr", t, v: 62 }]);
+  });
+});

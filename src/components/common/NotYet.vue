@@ -82,12 +82,12 @@ const pct = computed(() => {
   border-bottom: 1px solid color-mix(in srgb, var(--dim) 12%, transparent);
 }
 .rlabel {
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.6px;
   color: var(--dim);
 }
 .rvalue {
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: 0.5px;
   color: var(--ink);
 }
@@ -100,12 +100,12 @@ const pct = computed(() => {
 /* The number you have is the fact; the target is context for it. Setting both
    at one size made the row read as a fraction to be solved. */
 .have {
-  font-size: 17px;
+  font-size: 18px;
   color: var(--ink);
   letter-spacing: 0.5px;
 }
 .of {
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.8px;
   color: var(--dim);
 }
@@ -127,7 +127,7 @@ const pct = computed(() => {
 }
 .why {
   margin: 0;
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--dim);
 }

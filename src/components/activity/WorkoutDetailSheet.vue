@@ -139,11 +139,19 @@
             </template>
             <template v-else>TAP EITHER END OF THE SESSION TO MOVE IT</template>
           </div>
+          <!-- **How it was derived, where it was derived.** "EST" says a figure
+               is not measured and stops there, which left a number built from
+               your own heart rate through the session reading exactly like one
+               built from an activity name and a clock. Measured on this archive
+               those are 4.2% and 9.1% wrong respectively, so they are not the
+               same claim. A band figure carries no caption at all, because it is
+               a measurement. -->
           <div v-if="calories" class="fieldrow">
             <span class="mono">CALORIES</span>
             <span class="mono">
               {{ calories.kcal }} KCAL
-              <span v-if="calories.estimated" class="est">EST</span>
+              <span v-if="sourceLabel" class="est">{{ sourceLabel }}</span>
+              <span v-else-if="calories.estimated" class="est">EST</span>
             </span>
           </div>
           <!-- Recomputed from the samples across the window you chose, not
@@ -316,6 +324,7 @@ import { useBackClose } from "@/composables/useBackClose";
 import { useSessionsStore } from "@/stores/sessions";
 import { pairContaining } from "./sessionOverlap";
 import { getSamples } from "@/utils/sampleDb";
+import { calorieSourceLabel } from "@/utils/sessionCalories";
 import { workoutDateTimeLabel, workoutDurationLabel } from "./workouts";
 import {
   heartStats,
@@ -694,6 +703,8 @@ const stats = computed(() =>
 // corrected figure and bandActiveSeconds holds the original. Calories always
 // come from the band and always describe the band's own window, so that is the
 // duration they have to be scaled against.
+const sourceLabel = computed(() => calorieSourceLabel(props.workout.caloriesSource));
+
 const calories = computed(() =>
   scaledCalories(
     props.workout.caloriesKcal,
@@ -745,14 +756,14 @@ const calories = computed(() =>
 .tlabel {
   width: 52px;
   flex: none;
-  font-size: 11px;
+  font-size: 13.5px;
   letter-spacing: 1.6px;
   color: var(--fam-activity);
 }
 .tvalue {
   flex: 1;
   min-width: 0;
-  font-size: 15px;
+  font-size: 16px;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -760,13 +771,13 @@ const calories = computed(() =>
 }
 .tvalue.unset {
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: 1.4px;
   font-family: var(--font-mono);
 }
 .tchev {
   color: var(--dim);
-  font-size: 15px;
+  font-size: 16px;
 }
 .notewrap {
   display: flex;
@@ -789,7 +800,7 @@ const calories = computed(() =>
   resize: none;
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.45;
 }
 .note:focus {
@@ -894,7 +905,7 @@ const calories = computed(() =>
   border: 1px solid color-mix(in srgb, var(--dim) 40%, transparent);
   border-radius: 7px;
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: 14px;
   letter-spacing: 1.6px;
   cursor: pointer;
 }
@@ -914,7 +925,7 @@ const calories = computed(() =>
 }
 .confirmtext {
   margin: 0 0 12px;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
   color: var(--body);
 }
@@ -930,7 +941,7 @@ const calories = computed(() =>
   align-items: center;
   gap: 9px;
   margin-top: 16px;
-  font-size: 13px;
+  font-size: 14.5px;
   letter-spacing: 1.2px;
   color: var(--ink);
 }
@@ -943,13 +954,13 @@ const calories = computed(() =>
 }
 .est {
   margin-left: 5px;
-  font-size: 9.5px;
+  font-size: 13px;
   letter-spacing: 1.2px;
   color: var(--dim);
 }
 .dim-text {
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 400;
   margin-top: 14px;
 }
@@ -963,7 +974,7 @@ const calories = computed(() =>
   gap: 10px;
   min-height: 44px;
   padding: 8px 0;
-  font-size: 13px;
+  font-size: 14.5px;
   border-bottom: 1px solid color-mix(in srgb, var(--acc) 12%, transparent);
 }
 .durbox {
@@ -974,7 +985,7 @@ const calories = computed(() =>
 .durval {
   min-width: 74px;
   text-align: center;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
@@ -986,7 +997,7 @@ const calories = computed(() =>
   border: 1px solid color-mix(in srgb, var(--fam-activity) 40%, transparent);
   border-radius: 6px;
   color: var(--fam-activity);
-  font-size: 17px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
 }
@@ -1003,7 +1014,7 @@ const calories = computed(() =>
   gap: 10px;
   flex-wrap: wrap;
   padding: 9px 0 0;
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.2px;
   color: var(--dim);
   /* Two lines' worth, reserved. This row says three different things and the
@@ -1017,7 +1028,7 @@ const calories = computed(() =>
   border: 0;
   padding: 4px 0;
   color: var(--fam-activity);
-  font-size: 10.5px;
+  font-size: 13.5px;
   letter-spacing: 1.2px;
   cursor: pointer;
   text-decoration: underline;

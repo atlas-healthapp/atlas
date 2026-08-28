@@ -509,3 +509,79 @@ describe("the app's rate limit and the service's clock", () => {
     expect(plugin.connect.mock.calls.length).toBe(before);
   });
 });
+
+// The workout cursor only ever moved forward, so a session the band exposed
+// after a later one was already stored could never be asked for again.
+//
+// The band hands back the EARLIEST session at or after the date asked for, which
+// is why workouts use an absolute cursor where every other type uses a day
+// window. That cursor is `newestWorkoutStart()`, and nothing ever asked behind
+// it - so Zepp contention, which locks Atlas out of the band for as long as
+// somebody is in that app, could leave a session permanently unreachable.
+describe("the workout cursor", () => {
+  beforeEach(() => {
+    // Real timers, unlike the suites above, and no fake-indexeddb: the archive
+    // is stubbed at `newestWorkoutStart` instead. Standing up a real fake DB
+    // here made two existing tests hang, because that call used to throw
+    // instantly and be caught, and awaiting a real one never settles under the
+    // fake timers they run on.
+    stubLocalStorage();
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    listeners = [];
+    plugin.addListener.mockImplementation(async (_name, callback) => {
+      listeners.push(callback);
+      return {
+        remove: async () => {
+          listeners = listeners.filter((l) => l !== callback);
+        },
+      };
+    });
+    plugin.connect.mockImplementation(async () => {
+      queueMicrotask(() => emit({ event: "fetchComplete" }));
+    });
+    plugin.disconnect.mockResolvedValue(undefined);
+  });
+
+  it("asks from the start of the window while a deep fetch is owed", async () => {
+    // The repair. Zero makes the round fall back to `sinceDays`, which the deep
+    // fetch has already widened to a month, so the walk starts behind the
+    // watermark and picks up whatever was skipped. Safe because putWorkouts
+    // upserts on startMillis - re-fetching a stored session cannot duplicate it.
+    const sampleDb = await import("@/utils/sampleDb");
+    const cursor = vi.spyOn(sampleDb, "newestWorkoutStart");
+
+    const store = useHelioStore();
+    store.setAuthKey(AUTH_KEY);
+    await store.sync(1);
+
+    const call = plugin.connect.mock.calls[0][0];
+    expect(call.sinceDays).toBe(30);
+    expect(call.workoutSinceMillis).toBe("0");
+    // Not merely zero by accident: the archive is not consulted at all, which is
+    // what makes this independent of what happens to be stored.
+    expect(cursor).not.toHaveBeenCalled();
+  });
+
+  it("asks from the newest stored session once the deep fetch is done", async () => {
+    // The ordinary path is unchanged: re-walking a month on every sync would
+    // spend the band's battery for nothing.
+    const newest = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    const sampleDb = await import("@/utils/sampleDb");
+    vi.spyOn(sampleDb, "newestWorkoutStart").mockResolvedValue(newest);
+
+    const store = useHelioStore();
+    store.setAuthKey(AUTH_KEY);
+    await store.sync(1);
+
+    vi.clearAllMocks();
+    plugin.connect.mockImplementation(async () => {
+      queueMicrotask(() => emit({ event: "fetchComplete" }));
+    });
+    await store.sync(1);
+
+    const call = plugin.connect.mock.calls[0][0];
+    expect(call.sinceDays).toBe(1);
+    expect(call.workoutSinceMillis).toBe(String(newest));
+  });
+});

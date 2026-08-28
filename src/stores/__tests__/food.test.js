@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
-import { useFoodStore } from "@/stores/food";
+import { useFoodStore, mealTypeFromTime } from "@/stores/food";
 
 // The stores persist through utils/storage.js, which reaches for a bare
 // localStorage that the node test environment does not provide.
@@ -169,5 +169,48 @@ describe("log-time extras", () => {
     expect(() => food.addExtra("2026-07-29", "snack", 0, "nope", 1)).not.toThrow();
     expect(() => food.addExtra("2026-01-01", "snack", 0, eggId, 1)).not.toThrow();
     expect(food.proteinFor("2026-07-29")).toBe(30);
+  });
+});
+
+// Kind says where an item MAY be used; mealType says which section this log
+// landed in. Conflating the two is what sent Nuttelex, filed as a snack
+// because that is the only kind that fits a spread, into SNACKS every time it
+// was added to breakfast - the section the user had explicitly chosen.
+describe("the section a log lands in", () => {
+  beforeEach(() => {
+    installLocalStorageShim();
+    setActivePinia(createPinia());
+  });
+
+  function withSpread() {
+    const food = useFoodStore();
+    const id = food.addLibraryItem({
+      name: "Nuttelex",
+      kind: "snack",
+      protein: 0,
+      kcal: 60,
+      baseAmount: 10,
+      baseUnit: "g",
+    });
+    return { food, id };
+  }
+
+  it("keeps a snack-kind item in the section it was added to", () => {
+    const { food, id } = withSpread();
+    food.addSnack("2026-08-22", id, 1, "breakfast");
+    expect(food.planFor("2026-08-22").snacks[0].mealType).toBe("breakfast");
+  });
+
+  it("still honours an explicit snack section", () => {
+    const { food, id } = withSpread();
+    food.addSnack("2026-08-22", id, 1, "snack");
+    expect(food.planFor("2026-08-22").snacks[0].mealType).toBe("snack");
+  });
+
+  it("falls back to the clock when no section is named", () => {
+    const { food, id } = withSpread();
+    food.addSnack("2026-08-22", id, 1, undefined);
+    const expected = mealTypeFromTime(new Date().toTimeString().slice(0, 5));
+    expect(food.planFor("2026-08-22").snacks[0].mealType).toBe(expected);
   });
 });
